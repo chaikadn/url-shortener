@@ -29,16 +29,21 @@ func (h Handler) ShortenURL(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if len(longURL) == 0 {
+		http.Error(w, "request body can not be empty", http.StatusBadRequest)
+		return
+	}
+
 	shortURL, err := h.storage.Add(string(longURL))
 	if err != nil {
-		http.Error(w, "can't shorten URL: "+err.Error(), http.StatusInternalServerError)
+		http.Error(w, "can't shorten URL: "+err.Error(), http.StatusInternalServerError) // log message
 		return
 	}
 
 	w.WriteHeader(http.StatusCreated)
 	_, err = w.Write([]byte(host + port + "/" + shortURL)) // http://localhost:8080/EwHXdJfB
 	if err != nil {
-		http.Error(w, "can't write responce: "+err.Error(), http.StatusInternalServerError)
+		http.Error(w, "can't write responce: "+err.Error(), http.StatusInternalServerError) // log message
 		return
 	}
 }
