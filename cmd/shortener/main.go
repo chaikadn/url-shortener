@@ -1,12 +1,21 @@
 package main
 
-import "github.com/chaikadn/url-shortener/internal/app/server"
+import (
+	"fmt"
+
+	"github.com/chaikadn/url-shortener/internal/app/handler"
+	"github.com/chaikadn/url-shortener/internal/app/server"
+	"github.com/chaikadn/url-shortener/internal/app/storage/memory"
+)
 
 func main() {
 
-	srv := server.New("", ":8080")
+	storage := memory.NewStorage()
+	handler := handler.New(storage)
+	server := server.New(*handler)
 
-	if err := srv.Run(); err != nil {
+	fmt.Println("service started")
+	if err := server.ListenAndServe(); err != nil {
 		panic(err)
 	}
 }

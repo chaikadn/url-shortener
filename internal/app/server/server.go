@@ -1,36 +1,19 @@
 package server
 
 import (
-	"fmt"
 	"net/http"
 
 	"github.com/chaikadn/url-shortener/internal/app/handler"
-	"github.com/chaikadn/url-shortener/internal/app/storage/memory"
+	"github.com/go-chi/chi/v5"
 )
 
-// TODO: refactor
+func New(handler handler.Handler) *http.Server {
+	r := chi.NewRouter()
 
-type Server struct {
-	host string
-	port string
-}
+	r.Mount("/", handler.Route())
 
-func New(host, port string) *Server {
-	return &Server{
-		host: host,
-		port: port,
+	return &http.Server{
+		Addr:    ":8080",
+		Handler: r,
 	}
-}
-
-func (s *Server) Run() error {
-	st := memory.NewStorage()
-	hr := handler.New(st)
-
-	// Add handlers here:
-	http.HandleFunc("/", hr.ShortenURL)
-	http.HandleFunc("/{id}", hr.GetURL)
-
-	fmt.Println("service started")
-
-	return http.ListenAndServe(s.host+s.port, nil)
 }
