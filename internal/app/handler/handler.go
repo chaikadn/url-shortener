@@ -4,20 +4,23 @@ import (
 	"io"
 	"net/http"
 
+	"github.com/chaikadn/url-shortener/internal/app/config"
 	"github.com/chaikadn/url-shortener/internal/app/storage"
 	"github.com/chaikadn/url-shortener/internal/app/util"
 	"github.com/go-chi/chi/v5"
 )
 
-var host, port = "http://localhost", ":8080"
-
 type Handler struct {
 	storage storage.Storage
+	config  *config.Config
 	// logger interface
 }
 
-func New(st storage.Storage) *Handler {
-	return &Handler{st}
+func New(st storage.Storage, cn *config.Config) *Handler {
+	return &Handler{
+		storage: st,
+		config:  cn,
+	}
 }
 
 func (h *Handler) Route() *chi.Mux {
@@ -50,7 +53,7 @@ func (h *Handler) postURL(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.WriteHeader(http.StatusCreated)
-	_, err = w.Write([]byte(host + port + "/" + shortURL)) // http://localhost:8080/EwHXdJfB
+	_, err = w.Write([]byte(h.config.BaseURL + "/" + shortURL)) // http://localhost:8080/EwHXdJfB
 	if err != nil {
 		http.Error(w, "Unable to make responce", http.StatusInternalServerError)
 		// log.Printf(...)

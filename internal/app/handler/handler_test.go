@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/chaikadn/url-shortener/internal/app/config"
 	"github.com/chaikadn/url-shortener/internal/app/storage/memory"
 	"github.com/go-chi/chi/v5"
 	"github.com/go-resty/resty/v2"
@@ -14,7 +15,7 @@ import (
 
 func TestHandler_postURL(t *testing.T) {
 	storage := memory.NewStorage()
-	handler := New(storage)
+	handler := New(storage, &config.Config{})
 
 	r := chi.NewRouter()
 	r.Post("/", handler.postURL)
@@ -78,7 +79,7 @@ func TestHandler_postURL(t *testing.T) {
 
 func TestHandler_getURL(t *testing.T) {
 	storage := memory.NewStorage()
-	handler := New(storage)
+	handler := New(storage, &config.Config{})
 
 	r := chi.NewRouter()
 	r.Get("/{id}", handler.getURL)
