@@ -12,6 +12,7 @@ import (
 func main() {
 	config := config.New()
 	config.ParseFlags()
+	config.ParseEnv()
 
 	storage := memory.NewStorage()
 	handler := handler.New(storage, config)
