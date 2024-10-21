@@ -1,0 +1,70 @@
+package handler
+
+import (
+	"io"
+	"net/http"
+
+	"github.com/chaikadn/url-shortener/internal/app/config"
+	"github.com/chaikadn/url-shortener/internal/app/storage"
+	"github.com/chaikadn/url-shortener/internal/app/util"
+	"github.com/go-chi/chi/v5"
+)
+
+type Handler struct {
+	storage storage.Storage
+	config  *config.Config
+}
+
+func New(st storage.Storage, cn *config.Config) *Handler {
+	return &Handler{
+		storage: st,
+		config:  cn,
+	}
+}
+
+func (h *Handler) Route() *chi.Mux {
+	r := chi.NewRouter()
+	r.Post("/", h.postURL)
+	r.Get("/{id}", h.getURL)
+	return r
+}
+
+func (h *Handler) postURL(w http.ResponseWriter, r *http.Request) {
+	longURL, err := io.ReadAll(r.Body)
+	if err != nil {
+		http.Error(w, "Unable to read request", http.StatusBadRequest)
+		return
+	}
+	defer r.Body.Close()
+
+	if !util.IsValidURL(string(longURL)) {
+		http.Error(w, "URL is invalid or empty", http.StatusBadRequest)
+		return
+	}
+
+	shortURL, err := h.storage.Add(string(longURL))
+	if err != nil {
+		http.Error(w, "Unable to shorten URL: ", http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusCreated)
+	_, err = w.Write([]byte(h.config.BaseURL + "/" + shortURL)) // http://localhost:8080/EwHXdJfB
+	if err != nil {
+		http.Error(w, "Unable to make responce", http.StatusInternalServerError)
+		return
+	}
+}
+
+func (h *Handler) getURL(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	location, err := h.storage.Get(id)
+
+	if err != nil {
+		http.Error(w, "Unable to get URL", http.StatusBadRequest)
+		return
+	}
+
+	w.Header().Set("Location", location)
+	w.WriteHeader(http.StatusTemporaryRedirect)
+}
