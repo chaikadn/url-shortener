@@ -7,20 +7,23 @@ import (
 )
 
 type Config struct {
-	Host    string `env:"SERVER_ADDRESS"`
-	BaseURL string `env:"BASE_URL"`
+	Host     string `env:"SERVER_ADDRESS"`
+	BaseURL  string `env:"BASE_URL"`
+	LogLevel string `env:"LOG_LEVEL"`
 }
 
 func New() *Config {
 	return &Config{
-		Host:    "localhost:8080",
-		BaseURL: "http://localhost:8080",
+		Host:     "localhost:8080",
+		BaseURL:  "http://localhost:8080",
+		LogLevel: "info",
 	}
 }
 
 func (c *Config) ParseFlags() {
 	flag.StringVar(&c.Host, "a", c.Host, "address and port to run server")
 	flag.StringVar(&c.BaseURL, "b", c.BaseURL, "base short URL addres")
+	flag.StringVar(&c.LogLevel, "l", c.LogLevel, "log level")
 	flag.Parse()
 }
 
