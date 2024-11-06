@@ -26,7 +26,6 @@ func TestHandler_postURL(t *testing.T) {
 	tests := []struct {
 		name         string
 		method       string
-		path         string
 		body         string
 		expectedCode int
 		// expectedBody     string
@@ -34,7 +33,6 @@ func TestHandler_postURL(t *testing.T) {
 		{
 			name:         "positive test",
 			method:       http.MethodPost,
-			path:         "/",
 			body:         "https://practicum.yandex.ru/",
 			expectedCode: http.StatusCreated,
 			// expectedBody: "fixedBody",
@@ -42,21 +40,18 @@ func TestHandler_postURL(t *testing.T) {
 		{
 			name:         "empty body test",
 			method:       http.MethodPost,
-			path:         "/",
 			body:         "",
 			expectedCode: http.StatusBadRequest,
 		},
 		{
 			name:         "invalid url test",
 			method:       http.MethodPost,
-			path:         "/",
 			body:         "invalid-url",
 			expectedCode: http.StatusBadRequest,
 		},
 		{
 			name:         "wrong method test",
 			method:       http.MethodGet,
-			path:         "/",
 			body:         "any-url",
 			expectedCode: http.StatusMethodNotAllowed,
 		},
@@ -65,7 +60,7 @@ func TestHandler_postURL(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			req := resty.New().R()
 			req.Method = tt.method
-			req.URL = server.URL + tt.path
+			req.URL = server.URL
 			req.Body = tt.body
 
 			resp, err := req.Send()
@@ -134,6 +129,70 @@ func TestHandler_getURL(t *testing.T) {
 			assert.Equal(t, tt.expectedCode, resp.StatusCode(), "Response code didn't match expected")
 			assert.Equal(t, tt.expectedLocation, resp.Header().Get("Location"))
 			assert.Equal(t, tt.expectedBody, string(resp.Body()))
+		})
+	}
+}
+
+// TODO
+func TestHandler_shorten(t *testing.T) {
+	storage := memory.NewStorage()
+	handler := New(storage, &config.Config{})
+
+	// REFACTOR
+	r := chi.NewRouter()
+	r.Post("/", handler.shorten)
+	server := httptest.NewServer(r)
+	defer server.Close()
+
+	tests := []struct {
+		name         string
+		method       string
+		body         string
+		expectedCode int
+	}{
+		{
+			name:         "positive test",
+			method:       http.MethodPost,
+			body:         `{"url": "https://practicum.yandex.ru"}`,
+			expectedCode: http.StatusCreated,
+		},
+		{
+			name:         "empty body test",
+			method:       http.MethodPost,
+			expectedCode: http.StatusInternalServerError,
+		},
+		{
+			name:         "invalid url test",
+			method:       http.MethodPost,
+			body:         `{"url": "invalid-url"}`,
+			expectedCode: http.StatusBadRequest,
+		},
+		{
+			name:         "wrong method test",
+			method:       http.MethodGet,
+			body:         `{}`,
+			expectedCode: http.StatusMethodNotAllowed,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := resty.New().R()
+			req.Method = tt.method
+			req.URL = server.URL
+			if len(tt.body) > 0 {
+				req.SetHeader("Content-Type", "application/json")
+				req.SetBody(tt.body)
+			}
+
+			resp, err := req.Send()
+			assert.NoError(t, err, "error making HTTP request")
+
+			assert.Equal(t, tt.expectedCode, resp.StatusCode(), "Response code didn't match expected")
+			// проверяем корректность полученного тела ответа, если мы его ожидаем
+			// if tt.expectedBody != "" {
+			// 	assert.JSONEq(t, tt.expectedBody, string(resp.Body()))
+			// }
 		})
 	}
 }

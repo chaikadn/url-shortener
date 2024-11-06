@@ -14,12 +14,12 @@ func TestIsValidURL(t *testing.T) {
 			want:   true,
 		},
 		{
-			name:   "invalid URL test",
+			name:   "invalid url test",
 			rawURL: "bad-url",
 			want:   false,
 		},
 		{
-			name:   "empty URL test",
+			name:   "empty url test",
 			rawURL: "",
 			want:   false,
 		},

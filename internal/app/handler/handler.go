@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"encoding/json"
 	"io"
 	"net/http"
 
@@ -25,6 +26,7 @@ func New(st storage.Storage, cn *config.Config) *Handler {
 func (h *Handler) Route() *chi.Mux {
 	r := chi.NewRouter()
 	r.Post("/", h.postURL)
+	r.Post("/api/shorten", h.shorten)
 	r.Get("/{id}", h.getURL)
 	return r
 }
@@ -51,7 +53,7 @@ func (h *Handler) postURL(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusCreated)
 	_, err = w.Write([]byte(h.config.BaseURL + "/" + shortURL)) // http://localhost:8080/EwHXdJfB
 	if err != nil {
-		http.Error(w, "Unable to make responce", http.StatusInternalServerError)
+		http.Error(w, "Unable to make response", http.StatusInternalServerError)
 		return
 	}
 }
@@ -67,4 +69,34 @@ func (h *Handler) getURL(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Location", location)
 	w.WriteHeader(http.StatusTemporaryRedirect)
+}
+
+func (h *Handler) shorten(w http.ResponseWriter, r *http.Request) {
+	req := request{}
+	dec := json.NewDecoder(r.Body)
+	if err := dec.Decode(&req); err != nil {
+		http.Error(w, "cannot decode request JSON body", http.StatusInternalServerError)
+		return
+	}
+	if !util.IsValidURL(req.Url) {
+		http.Error(w, "URL is invalid or empty", http.StatusBadRequest)
+		return
+	}
+	res, err := h.storage.Add(string(req.Url))
+	if err != nil {
+		http.Error(w, "cannot shorten URL", http.StatusInternalServerError)
+		return
+	}
+	resp := Response{
+		Result: h.config.BaseURL + "/" + res,
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusCreated)
+
+	enc := json.NewEncoder(w)
+	if err := enc.Encode(resp); err != nil {
+		http.Error(w, "error encoding response", http.StatusInternalServerError)
+		return
+	}
 }
