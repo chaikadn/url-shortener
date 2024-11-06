@@ -78,11 +78,11 @@ func (h *Handler) shorten(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "cannot decode request JSON body", http.StatusInternalServerError)
 		return
 	}
-	if !util.IsValidURL(req.Url) {
+	if !util.IsValidURL(req.URL) {
 		http.Error(w, "URL is invalid or empty", http.StatusBadRequest)
 		return
 	}
-	res, err := h.storage.Add(string(req.Url))
+	res, err := h.storage.Add(string(req.URL))
 	if err != nil {
 		http.Error(w, "cannot shorten URL", http.StatusInternalServerError)
 		return
