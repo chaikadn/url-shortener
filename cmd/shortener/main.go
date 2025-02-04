@@ -10,21 +10,23 @@ import (
 )
 
 func main() {
-	config := config.New()
-	config.ParseFlags()
-	config.ParseEnv()
+	cfg := config.New()
 
-	if err := logger.Initialize(config.LogLevel); err != nil {
-		panic("cannot initialize loger: " + err.Error())
+	// TODO: обработать ошибки парсинга
+	cfg.ParseFlags()
+	cfg.ParseEnv()
+
+	if err := logger.Initialize(cfg.LogLevel); err != nil {
+		logger.Log.Fatal("failed to initialize logger", zap.Error(err))
 	}
 	defer logger.Log.Sync()
 
-	storage := memory.NewStorage()
-	handler := handler.New(storage, config)
-	server := server.New(handler, config)
+	stg := memory.NewStorage()
+	hnd := handler.New(stg, cfg)
+	srv := server.New(hnd, cfg)
 
-	logger.Log.Info("Starting server", zap.String("host", config.Host))
-	if err := server.ListenAndServe(); err != nil {
-		logger.Log.Fatal("cannot start server: " + err.Error())
+	logger.Log.Info("Starting server", zap.String("host", cfg.Host))
+	if err := srv.ListenAndServe(); err != nil {
+		logger.Log.Fatal("Cannot start server", zap.Error(err))
 	}
 }

@@ -32,12 +32,13 @@ func (h *Handler) Route() *chi.Mux {
 }
 
 func (h *Handler) postURL(w http.ResponseWriter, r *http.Request) {
+	defer r.Body.Close()
+
 	longURL, err := io.ReadAll(r.Body)
 	if err != nil {
 		http.Error(w, "Unable to read request", http.StatusBadRequest)
 		return
 	}
-	defer r.Body.Close()
 
 	if !util.IsValidURL(string(longURL)) {
 		http.Error(w, "URL is invalid or empty", http.StatusBadRequest)
@@ -46,7 +47,7 @@ func (h *Handler) postURL(w http.ResponseWriter, r *http.Request) {
 
 	shortURL, err := h.storage.Add(string(longURL))
 	if err != nil {
-		http.Error(w, "Unable to shorten URL: ", http.StatusInternalServerError)
+		http.Error(w, "Unable to shorten URL", http.StatusInternalServerError)
 		return
 	}
 
@@ -72,6 +73,8 @@ func (h *Handler) getURL(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) shorten(w http.ResponseWriter, r *http.Request) {
+	defer r.Body.Close()
+
 	req := request{}
 	dec := json.NewDecoder(r.Body)
 	if err := dec.Decode(&req); err != nil {
@@ -82,7 +85,7 @@ func (h *Handler) shorten(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "URL is invalid or empty", http.StatusBadRequest)
 		return
 	}
-	res, err := h.storage.Add(string(req.URL))
+	res, err := h.storage.Add(req.URL)
 	if err != nil {
 		http.Error(w, "cannot shorten URL", http.StatusInternalServerError)
 		return

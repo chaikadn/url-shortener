@@ -37,6 +37,7 @@ func WithLogging(next http.Handler) http.Handler {
 		uri := r.RequestURI
 		method := r.Method
 
+		// TODO: обработать ошибку
 		next.ServeHTTP(lw, r)
 
 		duration := time.Since(start)
