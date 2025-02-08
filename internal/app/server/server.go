@@ -9,13 +9,14 @@ import (
 	"github.com/go-chi/chi/v5"
 )
 
-func New(handler *handler.Handler, config *config.Config) *http.Server {
+func New(hnd *handler.Handler, cfg *config.Config) *http.Server {
 	r := chi.NewRouter()
 	r.Use(logger.WithLogging)
-	r.Mount("/", handler.Route())
+	r.Use(handler.WithGzip)
+	r.Mount("/", hnd.Route())
 
 	return &http.Server{
-		Addr:    config.Host,
+		Addr:    cfg.Host,
 		Handler: r,
 	}
 }

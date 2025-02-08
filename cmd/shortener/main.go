@@ -19,6 +19,9 @@ func main() {
 	if err := logger.Initialize(cfg.LogLevel); err != nil {
 		logger.Log.Fatal("failed to initialize logger", zap.Error(err))
 	}
+
+	// TODO: обрабоать ошибку
+	// defer func() {if err...}
 	defer logger.Log.Sync()
 
 	stg := memory.NewStorage()
