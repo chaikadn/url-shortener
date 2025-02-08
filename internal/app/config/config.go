@@ -7,13 +7,17 @@ import (
 )
 
 type Config struct {
-	Host     string `env:"SERVER_ADDRESS" default:"localhost:8080"`
-	BaseURL  string `env:"BASE_URL" default:"http://localhost:8080"`
-	LogLevel string `env:"LOG_LEVEL" default:"info"`
+	Host     string `env:"SERVER_ADDRESS"`
+	BaseURL  string `env:"BASE_URL"`
+	LogLevel string `env:"LOG_LEVEL"`
 }
 
 func New() *Config {
-	return &Config{}
+	return &Config{
+		Host:     "localhost:8080",
+		BaseURL:  "http://localhost:8080",
+		LogLevel: "info",
+	}
 }
 
 // TODO: сделать config.Load() вместо ParseFlags() и ParseEnv()
