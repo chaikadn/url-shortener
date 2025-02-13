@@ -1,6 +1,9 @@
 package util
 
-import "math/rand"
+import (
+	"math/rand"
+	"strconv"
+)
 
 func RandStr(length int) string {
 	chars := []rune("ABCDEFGHIGKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxuz1234567890")
@@ -11,4 +14,8 @@ func RandStr(length int) string {
 	}
 
 	return string(res)
+}
+
+func RandIntStr(n int) string {
+	return strconv.Itoa(rand.Intn(n))
 }

@@ -14,9 +14,10 @@ func Initialize(level string) error {
 	if err != nil {
 		return err
 	}
+
 	cfg := zap.NewDevelopmentConfig()
 	cfg.Level = lvl
-	zl, err := cfg.Build()
+	zl, err := cfg.Build(zap.AddStacktrace(zap.PanicLevel))
 	if err != nil {
 		return err
 	}

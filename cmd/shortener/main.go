@@ -12,24 +12,26 @@ import (
 func main() {
 	cfg := config.New()
 
-	// TODO: обработать ошибки парсинга
-	cfg.ParseFlags()
-	cfg.ParseEnv()
+	if err := cfg.Load(); err != nil {
+		logger.Log.Fatal("failed to initialize config", zap.Error(err))
+	}
 
 	if err := logger.Initialize(cfg.LogLevel); err != nil {
 		logger.Log.Fatal("failed to initialize logger", zap.Error(err))
 	}
-
-	// TODO: обрабоать ошибку
-	// defer func() {if err...}
 	defer logger.Log.Sync()
 
-	stg := memory.NewStorage()
-	hnd := handler.New(stg, cfg)
+	memStg := memory.NewStorage()
+
+	hnd, err := handler.New(memStg, cfg)
+	if err != nil {
+		logger.Log.Fatal("failed to initialize handler", zap.Error(err))
+	}
+
 	srv := server.New(hnd, cfg)
 
 	logger.Log.Info("Starting server", zap.String("host", cfg.Host))
 	if err := srv.ListenAndServe(); err != nil {
-		logger.Log.Fatal("Cannot start server", zap.Error(err))
+		logger.Log.Fatal("failed to start server", zap.Error(err))
 	}
 }

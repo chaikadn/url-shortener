@@ -3,38 +3,37 @@ package memory
 import (
 	"errors"
 
-	"github.com/chaikadn/url-shortener/internal/app/storage"
-	"github.com/chaikadn/url-shortener/internal/app/util"
+	"github.com/chaikadn/url-shortener/internal/app/model"
 )
 
-var _ storage.Storage = &memoryStorage{}
-
-type memoryStorage struct {
-	Storage map[string]string
+type MemoryStorage struct {
+	storage map[string]*model.URLEntry
+	nextID  int
 }
 
-func NewStorage() storage.Storage {
-	return &memoryStorage{
-		Storage: make(map[string]string),
+func NewStorage() *MemoryStorage {
+	return &MemoryStorage{
+		storage: make(map[string]*model.URLEntry),
+		nextID:  1,
 	}
 }
 
-func (m *memoryStorage) Add(longURL string) (string, error) {
-	shortURL := util.RandStr(8)
-
-	if _, ok := m.Storage[shortURL]; ok {
-		return "", errors.New("short URL already exists")
+func (m *MemoryStorage) Add(data *model.URLEntry) error {
+	if _, ok := m.storage[data.ShortURL]; ok {
+		return errors.New("short URL already exists")
 	}
-	m.Storage[shortURL] = longURL
-
-	return shortURL, nil
+	m.storage[data.ShortURL] = data
+	m.nextID++
+	return nil
 }
 
-func (m *memoryStorage) Get(shortURL string) (string, error) {
-
-	if _, ok := m.Storage[shortURL]; !ok {
-		return "", errors.New("short URL not found")
+func (m *MemoryStorage) Get(shortURL string) (*model.URLEntry, error) {
+	if _, ok := m.storage[shortURL]; !ok {
+		return nil, errors.New("short URL not found")
 	}
+	return m.storage[shortURL], nil
+}
 
-	return m.Storage[shortURL], nil
+func (m *MemoryStorage) GetNextID() int {
+	return m.nextID
 }
