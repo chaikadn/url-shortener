@@ -18,7 +18,7 @@ func New() *Config {
 		Host:            "localhost:8080",
 		BaseURL:         "http://localhost:8080",
 		LogLevel:        "info",
-		FileStoragePath: "short-url-db.json",
+		FileStoragePath: "temp/short-url-db.json",
 	}
 }
 

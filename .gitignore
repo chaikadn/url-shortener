@@ -25,3 +25,6 @@ vendor/
 # http test api
 *.http
 *.txt
+
+# temp directories
+temp/

@@ -3,6 +3,7 @@ package file
 import (
 	"encoding/json"
 	"os"
+	"path/filepath"
 
 	"github.com/chaikadn/url-shortener/internal/app/model"
 )
@@ -13,6 +14,10 @@ type jsonDecoder struct {
 }
 
 func NewJSONDecoder(filename string) (*jsonDecoder, error) {
+	dir := filepath.Dir(filename)
+	if err := os.MkdirAll(dir, 0775); err != nil {
+		return nil, err
+	}
 	// для увеличения производительности можно использовать буфер: bufio.NewReader(file)
 	file, err := os.OpenFile(filename, os.O_RDONLY|os.O_CREATE|os.O_APPEND, 0666)
 	if err != nil {
