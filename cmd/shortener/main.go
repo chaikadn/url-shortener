@@ -6,6 +6,7 @@ import (
 	"github.com/chaikadn/url-shortener/internal/app/logger"
 	"github.com/chaikadn/url-shortener/internal/app/server"
 	"github.com/chaikadn/url-shortener/internal/app/storage/memory"
+	"github.com/chaikadn/url-shortener/internal/app/storage/postgresql"
 	"go.uber.org/zap"
 )
 
@@ -23,7 +24,13 @@ func main() {
 
 	memStg := memory.NewStorage()
 
-	hnd, err := handler.New(memStg, cfg)
+	sqlStg, err := postgresql.NewStorage(cfg.DatabaseDSN)
+	if err != nil {
+		logger.Log.Fatal("failed to connect to database", zap.Error(err))
+	}
+	defer sqlStg.Close()
+
+	hnd, err := handler.New(memStg, sqlStg, cfg)
 	if err != nil {
 		logger.Log.Fatal("failed to initialize handler", zap.Error(err))
 	}

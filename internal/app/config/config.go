@@ -11,6 +11,7 @@ type Config struct {
 	BaseURL         string `env:"BASE_URL"`
 	LogLevel        string `env:"LOG_LEVEL"`
 	FileStoragePath string `env:"FILE_STORAGE_PATH"`
+	DatabaseDSN     string `env:"DATABASE_DSN"`
 }
 
 func New() *Config {
@@ -19,6 +20,10 @@ func New() *Config {
 		BaseURL:         "http://localhost:8080",
 		LogLevel:        "info",
 		FileStoragePath: "temp/short-url-db.json",
+
+		// "postgresql://user:password@localhost:5432/mydb?sslmode=disable" - для pgx
+		// "host=localhost port=5432 user=user password=password dbname=mydb sslmode=disable" - для lib/pq
+		DatabaseDSN: "postgresql://postgres:postgres@localhost:5432/shortener?sslmode=disable",
 	}
 }
 
@@ -35,6 +40,7 @@ func (c *Config) parseFlags() {
 	flag.StringVar(&c.BaseURL, "b", c.BaseURL, "base short URL address")
 	flag.StringVar(&c.LogLevel, "l", c.LogLevel, "log level")
 	flag.StringVar(&c.FileStoragePath, "f", c.FileStoragePath, "file storage path")
+	flag.StringVar(&c.DatabaseDSN, "d", c.DatabaseDSN, "Database DSN in URI format")
 	flag.Parse()
 }
 

@@ -11,6 +11,7 @@ import (
 	"github.com/chaikadn/url-shortener/internal/app/model"
 	"github.com/chaikadn/url-shortener/internal/app/storage/file"
 	"github.com/chaikadn/url-shortener/internal/app/storage/memory"
+	"github.com/chaikadn/url-shortener/internal/app/storage/postgresql"
 	"github.com/chaikadn/url-shortener/internal/app/util"
 	"github.com/go-chi/chi/v5"
 	"go.uber.org/zap"
@@ -20,10 +21,11 @@ import (
 
 type Handler struct {
 	memoryStorage *memory.MemoryStorage
+	sqlStorage    *postgresql.SqlStorage
 	config        *config.Config
 }
 
-func New(memSt *memory.MemoryStorage, cfg *config.Config) (*Handler, error) {
+func New(memSt *memory.MemoryStorage, sqlSt *postgresql.SqlStorage, cfg *config.Config) (*Handler, error) {
 	if cfg.FileStoragePath != "" {
 		dec, err := file.NewJSONDecoder(cfg.FileStoragePath)
 		if err != nil {
@@ -48,6 +50,7 @@ func New(memSt *memory.MemoryStorage, cfg *config.Config) (*Handler, error) {
 	}
 	return &Handler{
 		memoryStorage: memSt,
+		sqlStorage:    sqlSt,
 		config:        cfg,
 	}, nil
 }
@@ -57,6 +60,7 @@ func (h *Handler) Route() *chi.Mux {
 	r.Post("/", h.shortenFromText)
 	r.Post("/api/shorten", h.shortenFromJSON)
 	r.Get("/{short-url}", h.getURL)
+	r.Get("/ping", h.pingDB)
 	return r
 }
 
@@ -158,4 +162,13 @@ func (h *Handler) shortenAndSave(originalURL string) (string, error) {
 		}
 	}
 	return urlEntry.ShortURL, nil
+}
+
+func (h *Handler) pingDB(w http.ResponseWriter, r *http.Request) {
+	err := h.sqlStorage.Ping()
+	if err != nil {
+		logger.Log.Error("failed to connect to database", zap.Error(err))
+		http.Error(w, "failed to connect to database", http.StatusInternalServerError)
+		return
+	}
 }

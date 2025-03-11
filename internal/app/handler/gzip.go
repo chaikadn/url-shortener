@@ -98,7 +98,7 @@ func WithGzip(next http.Handler) http.Handler {
 	})
 }
 
-// доработать (может быть значенрие, например zip;q=0.8)
+// доработать (может быть значение, например zip;q=0.8)
 func parseHeader(header, value string) bool {
 	values := strings.Split(header, ",")
 	for _, val := range values {

@@ -2,7 +2,6 @@ package util
 
 import (
 	"math/rand"
-	"strconv"
 )
 
 func RandStr(length int) string {
@@ -14,8 +13,4 @@ func RandStr(length int) string {
 	}
 
 	return string(res)
-}
-
-func RandIntStr(n int) string {
-	return strconv.Itoa(rand.Intn(n))
 }
