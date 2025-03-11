@@ -6,25 +6,25 @@ import (
 	_ "github.com/jackc/pgx/v5/stdlib"
 )
 
-type SqlStorage struct {
+type SQLStorage struct {
 	db *sql.DB
 }
 
-func NewStorage(dsn string) (*SqlStorage, error) {
+func NewStorage(dsn string) (*SQLStorage, error) {
 	db, err := sql.Open("pgx", dsn)
 	if err != nil {
 		return nil, err
 	}
 
-	return &SqlStorage{
+	return &SQLStorage{
 		db: db,
 	}, nil
 }
 
-func (p *SqlStorage) Ping() error {
+func (p *SQLStorage) Ping() error {
 	return p.db.Ping()
 }
 
-func (p *SqlStorage) Close() error {
+func (p *SQLStorage) Close() error {
 	return p.db.Close()
 }

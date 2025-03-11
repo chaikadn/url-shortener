@@ -21,11 +21,11 @@ import (
 
 type Handler struct {
 	memoryStorage *memory.MemoryStorage
-	sqlStorage    *postgresql.SqlStorage
+	sqlStorage    *postgresql.SQLStorage
 	config        *config.Config
 }
 
-func New(memSt *memory.MemoryStorage, sqlSt *postgresql.SqlStorage, cfg *config.Config) (*Handler, error) {
+func New(memSt *memory.MemoryStorage, sqlSt *postgresql.SQLStorage, cfg *config.Config) (*Handler, error) {
 	if cfg.FileStoragePath != "" {
 		dec, err := file.NewJSONDecoder(cfg.FileStoragePath)
 		if err != nil {
