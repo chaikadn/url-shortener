@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
@@ -8,50 +9,21 @@ import (
 
 	"github.com/chaikadn/url-shortener/internal/app/config"
 	"github.com/chaikadn/url-shortener/internal/app/logger"
-	"github.com/chaikadn/url-shortener/internal/app/model"
-	"github.com/chaikadn/url-shortener/internal/app/storage/file"
-	"github.com/chaikadn/url-shortener/internal/app/storage/memory"
-	"github.com/chaikadn/url-shortener/internal/app/storage/postgresql"
+	"github.com/chaikadn/url-shortener/internal/app/storage"
 	"github.com/chaikadn/url-shortener/internal/app/util"
 	"github.com/go-chi/chi/v5"
 	"go.uber.org/zap"
 )
 
-// TODO: настроить логировангие через существующий middleware
-
 type Handler struct {
-	memoryStorage *memory.MemoryStorage
-	sqlStorage    *postgresql.SQLStorage
-	config        *config.Config
+	storage storage.Storage
+	config  *config.Config
 }
 
-func New(memSt *memory.MemoryStorage, sqlSt *postgresql.SQLStorage, cfg *config.Config) (*Handler, error) {
-	if cfg.FileStoragePath != "" {
-		dec, err := file.NewJSONDecoder(cfg.FileStoragePath)
-		if err != nil {
-			return nil, errors.New("failed to open file: " + err.Error())
-		}
-		defer dec.Close()
-
-		for {
-			entry := model.URLEntry{}
-			err := dec.ReadTo(&entry)
-			if err == io.EOF {
-				break
-			}
-			if err != nil {
-				return nil, errors.New("failed decode file: " + err.Error())
-			}
-			err = memSt.Add(&entry)
-			if err != nil {
-				return nil, errors.New("failed to save URL: " + err.Error())
-			}
-		}
-	}
+func New(stg storage.Storage, cfg *config.Config) (*Handler, error) {
 	return &Handler{
-		memoryStorage: memSt,
-		sqlStorage:    sqlSt,
-		config:        cfg,
+		storage: stg,
+		config:  cfg,
 	}, nil
 }
 
@@ -60,8 +32,22 @@ func (h *Handler) Route() *chi.Mux {
 	r.Post("/", h.shortenFromText)
 	r.Post("/api/shorten", h.shortenFromJSON)
 	r.Get("/{short-url}", h.getURL)
-	r.Get("/ping", h.pingDB)
+	r.Get("/ping", h.pingStorage)
 	return r
+}
+
+func (h *Handler) getURL(w http.ResponseWriter, r *http.Request) {
+	shortURL := chi.URLParam(r, "short-url")
+
+	originalURL, err := h.storage.Get(r.Context(), shortURL)
+	if err != nil {
+		logger.Log.Error("failed to get url", zap.Error(err))
+		http.Error(w, "failed to get url", http.StatusNotFound)
+		return
+	}
+
+	w.Header().Set("Location", originalURL)
+	w.WriteHeader(http.StatusTemporaryRedirect)
 }
 
 func (h *Handler) shortenFromText(w http.ResponseWriter, r *http.Request) {
@@ -73,10 +59,10 @@ func (h *Handler) shortenFromText(w http.ResponseWriter, r *http.Request) {
 	}
 	defer r.Body.Close()
 
-	shortURL, err := h.shortenAndSave(string(originalURL))
+	shortURL, err := h.shortenAndSave(r.Context(), string(originalURL))
 	if err != nil {
-		logger.Log.Error("failed to shorten URL", zap.Error(err))
-		http.Error(w, "failed to shorten URL", http.StatusBadRequest)
+		logger.Log.Error("failed to shorten url", zap.Error(err))
+		http.Error(w, "failed to shorten url", http.StatusBadRequest)
 		return
 	}
 
@@ -89,20 +75,6 @@ func (h *Handler) shortenFromText(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func (h *Handler) getURL(w http.ResponseWriter, r *http.Request) {
-	shortURL := chi.URLParam(r, "short-url")
-
-	data, err := h.memoryStorage.Get(shortURL)
-	if err != nil {
-		logger.Log.Error("failed to get URL", zap.Error(err))
-		http.Error(w, "failed to get URL", http.StatusNotFound)
-		return
-	}
-
-	w.Header().Set("Location", data.OriginalURL)
-	w.WriteHeader(http.StatusTemporaryRedirect)
-}
-
 func (h *Handler) shortenFromJSON(w http.ResponseWriter, r *http.Request) {
 	req := request{}
 	dec := json.NewDecoder(r.Body)
@@ -113,14 +85,14 @@ func (h *Handler) shortenFromJSON(w http.ResponseWriter, r *http.Request) {
 	}
 	defer r.Body.Close()
 
-	shortURL, err := h.shortenAndSave(req.URL)
+	shortURL, err := h.shortenAndSave(r.Context(), req.URL)
 	if err != nil {
-		logger.Log.Error("failed to shorten URL", zap.Error(err))
-		http.Error(w, "failed to shorten URL", http.StatusBadRequest)
+		logger.Log.Error("failed to shorten url", zap.Error(err))
+		http.Error(w, "failed to shorten url", http.StatusBadRequest)
 		return
 	}
 
-	resp := Response{
+	resp := response{
 		Result: h.config.BaseURL + "/" + shortURL,
 	}
 
@@ -134,41 +106,24 @@ func (h *Handler) shortenFromJSON(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func (h *Handler) shortenAndSave(originalURL string) (string, error) {
+func (h *Handler) shortenAndSave(ctx context.Context, originalURL string) (string, error) {
 	if !util.IsValidURL(originalURL) {
-		return "", errors.New("URL is invalid or empty")
+		return "", errors.New("url is invalid or empty")
 	}
 
-	urlEntry := model.URLEntry{
-		ID:          h.memoryStorage.GetNextID(),
-		ShortURL:    util.RandStr(8),
-		OriginalURL: originalURL,
+	shortURL := util.RandStr(8)
+	if err := h.storage.Add(ctx, originalURL, shortURL); err != nil {
+		return "", err
 	}
 
-	if err := h.memoryStorage.Add(&urlEntry); err != nil {
-		// http.Error(w, "failed to shorten URL", http.StatusInternalServerError)
-		return "", errors.New("failed to save URL: " + err.Error())
-	}
-	if h.config.FileStoragePath != "" {
-		enc, err := file.NewJSONEncoder(h.config.FileStoragePath)
-		if err != nil {
-			// http.Error(w, "failed to write file", http.StatusInternalServerError)
-			return "", errors.New("failed to open file: " + err.Error())
-		}
-		defer enc.Close()
-		err = enc.WriteFrom(&urlEntry)
-		if err != nil {
-			return "", errors.New("failed to encode file: " + err.Error())
-		}
-	}
-	return urlEntry.ShortURL, nil
+	return shortURL, nil
 }
 
-func (h *Handler) pingDB(w http.ResponseWriter, r *http.Request) {
-	err := h.sqlStorage.Ping()
+func (h *Handler) pingStorage(w http.ResponseWriter, r *http.Request) {
+	err := h.storage.Ping(r.Context())
 	if err != nil {
-		logger.Log.Error("failed to connect to database", zap.Error(err))
-		http.Error(w, "failed to connect to database", http.StatusInternalServerError)
+		logger.Log.Error("failed to connect to storage", zap.Error(err))
+		http.Error(w, "failed to connect to storage", http.StatusInternalServerError)
 		return
 	}
 }

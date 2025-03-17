@@ -1,62 +1,93 @@
 package file
 
 import (
+	"context"
 	"encoding/json"
+	"io"
 	"os"
 	"path/filepath"
 
-	"github.com/chaikadn/url-shortener/internal/app/model"
+	"github.com/chaikadn/url-shortener/internal/app/logger"
+	"github.com/chaikadn/url-shortener/internal/app/storage/memory"
 )
 
-type jsonDecoder struct {
-	file    *os.File
-	decoder *json.Decoder
+type urlEntry struct {
+	ShortURL    string `json:"short_url"`
+	OriginalURL string `json:"original_url"`
 }
 
-func NewJSONDecoder(filename string) (*jsonDecoder, error) {
+type FileStorage struct {
+	file    *os.File
+	decoder *json.Decoder
+	encoder *json.Encoder
+	memory  *memory.MemoryStorage
+}
+
+func NewStorage(filename string, memoryStorage *memory.MemoryStorage) (*FileStorage, error) {
 	dir := filepath.Dir(filename)
 	if err := os.MkdirAll(dir, 0775); err != nil {
 		return nil, err
 	}
-	// для увеличения производительности можно использовать буфер: bufio.NewReader(file)
-	file, err := os.OpenFile(filename, os.O_RDONLY|os.O_CREATE|os.O_APPEND, 0666)
+
+	fl, err := os.OpenFile(filename, os.O_RDWR|os.O_CREATE|os.O_APPEND, 0666)
 	if err != nil {
 		return nil, err
 	}
-	return &jsonDecoder{
-		file:    file,
-		decoder: json.NewDecoder(file),
-	}, nil
-}
 
-func (d *jsonDecoder) ReadTo(entry *model.URLEntry) error {
-	return d.decoder.Decode(entry)
-}
+	f := &FileStorage{
+		file:    fl,
+		decoder: json.NewDecoder(fl),
+		encoder: json.NewEncoder(fl),
+		memory:  memoryStorage,
+	}
 
-func (d *jsonDecoder) Close() error {
-	return d.file.Close()
-}
-
-type jsonEncoder struct {
-	file    *os.File
-	encoder *json.Encoder
-}
-
-func NewJSONEncoder(filename string) (*jsonEncoder, error) {
-	file, err := os.OpenFile(filename, os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0666)
-	if err != nil {
+	if err := f.loadEntries(); err != nil {
 		return nil, err
 	}
-	return &jsonEncoder{
-		file:    file,
-		encoder: json.NewEncoder(file),
-	}, nil
+
+	return f, nil
 }
 
-func (e *jsonEncoder) WriteFrom(entry *model.URLEntry) error {
-	return e.encoder.Encode(entry)
+func (f *FileStorage) loadEntries() error {
+	if _, err := f.file.Seek(0, io.SeekStart); err != nil {
+		return err
+	}
+	for {
+		var entry urlEntry
+		err := f.decoder.Decode(&entry)
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return err
+		}
+		if err := f.memory.Add(context.Background(), entry.OriginalURL, entry.ShortURL); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
-func (e *jsonEncoder) Close() error {
-	return e.file.Close()
+func (f *FileStorage) Add(ctx context.Context, longURL string, shortURL string) error {
+	entry := urlEntry{
+		ShortURL:    shortURL,
+		OriginalURL: longURL,
+	}
+	if err := f.encoder.Encode(entry); err != nil {
+		return err
+	}
+	return f.memory.Add(ctx, longURL, shortURL)
+}
+
+func (f *FileStorage) Get(ctx context.Context, shortURL string) (string, error) {
+	return f.memory.Get(ctx, shortURL)
+}
+
+func (f *FileStorage) Ping(ctx context.Context) error {
+	logger.Log.Info("Ping file storage")
+	return nil
+}
+
+func (f *FileStorage) Close() error {
+	return f.file.Close()
 }

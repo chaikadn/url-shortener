@@ -5,14 +5,12 @@ import (
 	"github.com/chaikadn/url-shortener/internal/app/handler"
 	"github.com/chaikadn/url-shortener/internal/app/logger"
 	"github.com/chaikadn/url-shortener/internal/app/server"
-	"github.com/chaikadn/url-shortener/internal/app/storage/memory"
-	"github.com/chaikadn/url-shortener/internal/app/storage/postgresql"
+	"github.com/chaikadn/url-shortener/internal/app/storage"
 	"go.uber.org/zap"
 )
 
 func main() {
 	cfg := config.New()
-
 	if err := cfg.Load(); err != nil {
 		logger.Log.Fatal("failed to initialize config", zap.Error(err))
 	}
@@ -22,15 +20,14 @@ func main() {
 	}
 	defer logger.Log.Sync()
 
-	memStg := memory.NewStorage()
-
-	sqlStg, err := postgresql.NewStorage(cfg.DatabaseDSN)
+	// с текущей реализацией всегда будет возвращен nil, исправить
+	stg, err := storage.Initialize(cfg)
 	if err != nil {
-		logger.Log.Fatal("failed to connect to database", zap.Error(err))
+		logger.Log.Fatal("failed to initialize storage", zap.Error(err))
 	}
-	defer sqlStg.Close()
+	defer stg.Close()
 
-	hnd, err := handler.New(memStg, sqlStg, cfg)
+	hnd, err := handler.New(stg, cfg)
 	if err != nil {
 		logger.Log.Fatal("failed to initialize handler", zap.Error(err))
 	}

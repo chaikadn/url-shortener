@@ -4,6 +4,6 @@ type request struct {
 	URL string `json:"url"`
 }
 
-type Response struct {
+type response struct {
 	Result string `json:"result"`
 }
