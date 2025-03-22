@@ -16,6 +16,6 @@ type requestBatch struct {
 }
 
 type responseBatch struct {
-	ID       string `json:"correlaiton_id"`
+	ID       string `json:"correlation_id"`
 	ShortURL string `json:"short_url"`
 }
