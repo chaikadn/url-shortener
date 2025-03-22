@@ -28,12 +28,20 @@ func New(stg storage.Storage, cfg *config.Config) (*Handler, error) {
 }
 
 func (h *Handler) Route() *chi.Mux {
-	r := chi.NewRouter()
-	r.Post("/", h.shortenFromText)
-	r.Post("/api/shorten", h.shortenFromJSON)
-	r.Get("/{short-url}", h.getURL)
-	r.Get("/ping", h.pingStorage)
-	return r
+	rt := chi.NewRouter()
+
+	rt.Post("/", h.shortenText)
+	rt.Get("/{short-url}", h.getURL)
+
+	rt.Route("/api", func(r chi.Router) {
+		r.Get("/ping", h.pingStorage)
+
+		// TODO: добавить middleware для игнорирования trailing slashes и сгруппировать маршруты
+		r.Post("/shorten", h.shortenJSON)
+		r.Post("/shorten/batch", h.shortenJSONbatch)
+	})
+
+	return rt
 }
 
 func (h *Handler) getURL(w http.ResponseWriter, r *http.Request) {
@@ -50,7 +58,7 @@ func (h *Handler) getURL(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusTemporaryRedirect)
 }
 
-func (h *Handler) shortenFromText(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) shortenText(w http.ResponseWriter, r *http.Request) {
 	originalURL, err := io.ReadAll(r.Body)
 	if err != nil {
 		logger.Log.Error("failed to read request", zap.Error(err))
@@ -75,15 +83,13 @@ func (h *Handler) shortenFromText(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func (h *Handler) shortenFromJSON(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) shortenJSON(w http.ResponseWriter, r *http.Request) {
 	req := request{}
-	dec := json.NewDecoder(r.Body)
-	if err := dec.Decode(&req); err != nil {
+	if err := h.decodeJSON(r.Body, &req); err != nil {
 		logger.Log.Error("failed to decode request", zap.Error(err))
 		http.Error(w, "failed to decode request", http.StatusBadRequest)
 		return
 	}
-	defer r.Body.Close()
 
 	shortURL, err := h.shortenAndSave(r.Context(), req.URL)
 	if err != nil {
@@ -98,12 +104,57 @@ func (h *Handler) shortenFromJSON(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
-	enc := json.NewEncoder(w)
-	if err := enc.Encode(resp); err != nil {
+
+	if err := h.encodeJSON(w, resp); err != nil {
 		logger.Log.Error("failed to encode response", zap.Error(err))
 		http.Error(w, "failed to encode response", http.StatusInternalServerError)
 		return
 	}
+}
+
+func (h *Handler) shortenJSONbatch(w http.ResponseWriter, r *http.Request) {
+	var reqBatch []requestBatch
+
+	if err := h.decodeJSON(r.Body, &reqBatch); err != nil {
+		logger.Log.Error("failed to decode request", zap.Error(err))
+		http.Error(w, "failed to decode request", http.StatusBadRequest)
+		return
+	}
+
+	var respBatch []responseBatch
+	// TODO: id не сохраняются в storage, исправить
+	// будет медленно работать, найти решение (транзакции и скомпилированные запросы в postgresql)
+	for _, req := range reqBatch {
+		shortURL, err := h.shortenAndSave(r.Context(), req.OriginalURL)
+		if err != nil {
+			logger.Log.Error("failed to shorten url", zap.Error(err))
+			http.Error(w, "failed to shorten url", http.StatusBadRequest)
+			return
+		}
+		respBatch = append(respBatch,
+			responseBatch{
+				ID:       req.ID,
+				ShortURL: h.config.BaseURL + "/" + shortURL,
+			})
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusCreated)
+
+	if err := h.encodeJSON(w, respBatch); err != nil {
+		logger.Log.Error("failed to encode response", zap.Error(err))
+		http.Error(w, "failed to encode response", http.StatusInternalServerError)
+		return
+	}
+}
+
+func (h *Handler) decodeJSON(r io.ReadCloser, source any) error {
+	defer r.Close()
+	return json.NewDecoder(r).Decode(source)
+}
+
+func (h *Handler) encodeJSON(w io.Writer, dest any) error {
+	return json.NewEncoder(w).Encode(dest)
 }
 
 func (h *Handler) shortenAndSave(ctx context.Context, originalURL string) (string, error) {

@@ -11,8 +11,7 @@ import (
 
 func New(hnd *handler.Handler, cfg *config.Config) *http.Server {
 	r := chi.NewRouter()
-	r.Use(logger.WithLogging)
-	r.Use(handler.WithGzip)
+	r.Use(logger.WithLogging, handler.WithGzip)
 	r.Mount("/", hnd.Route())
 
 	return &http.Server{
