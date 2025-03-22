@@ -31,11 +31,10 @@ func (h *Handler) Route() *chi.Mux {
 	rt := chi.NewRouter()
 
 	rt.Post("/", h.shortenText)
+	rt.Get("/ping", h.pingStorage)
 	rt.Get("/{short-url}", h.getURL)
 
 	rt.Route("/api", func(r chi.Router) {
-		r.Get("/ping", h.pingStorage)
-
 		// TODO: добавить middleware для игнорирования trailing slashes и сгруппировать маршруты
 		r.Post("/shorten", h.shortenJSON)
 		r.Post("/shorten/batch", h.shortenJSONbatch)
