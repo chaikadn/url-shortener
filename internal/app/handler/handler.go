@@ -120,6 +120,12 @@ func (h *Handler) shortenJSONbatch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if len(reqBatch) == 0 {
+		logger.Log.Error("sent empty batch")
+		http.Error(w, "batch cannot be empty", http.StatusBadRequest)
+		return
+	}
+
 	var respBatch []responseBatch
 	// TODO: id не сохраняются в storage, исправить
 	// будет медленно работать, найти решение (транзакции и скомпилированные запросы в postgresql)

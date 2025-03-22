@@ -1,6 +1,6 @@
 module github.com/chaikadn/url-shortener
 
-go 1.22
+go 1.24
 
 require (
 	github.com/caarlos0/env/v6 v6.10.1
