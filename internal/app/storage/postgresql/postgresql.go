@@ -80,7 +80,7 @@ func (s *SQLStorage) AddBatch(ctx context.Context, batch []*storage.URLEntry) er
 func (s *SQLStorage) GetOriginal(ctx context.Context, shortURL string) (*storage.URLEntry, error) {
 	entry := storage.URLEntry{ShortURL: shortURL}
 	row := s.db.QueryRowContext(ctx, `SELECT original_url FROM urls WHERE short_url = $1`, shortURL)
-	err := row.Scan(entry.OriginalURL)
+	err := row.Scan(&entry.OriginalURL)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, storage.ErrNotFound
