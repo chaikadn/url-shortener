@@ -6,6 +6,9 @@ import (
 	"github.com/chaikadn/url-shortener/internal/app/logger"
 	"github.com/chaikadn/url-shortener/internal/app/server"
 	"github.com/chaikadn/url-shortener/internal/app/storage"
+	"github.com/chaikadn/url-shortener/internal/app/storage/file"
+	"github.com/chaikadn/url-shortener/internal/app/storage/memory"
+	"github.com/chaikadn/url-shortener/internal/app/storage/postgresql"
 	"go.uber.org/zap"
 )
 
@@ -20,8 +23,7 @@ func main() {
 	}
 	defer logger.Log.Sync()
 
-	// с текущей реализацией всегда будет возвращен nil, исправить
-	stg, err := storage.Initialize(cfg)
+	stg, err := initStorage(cfg)
 	if err != nil {
 		logger.Log.Fatal("failed to initialize storage", zap.Error(err))
 	}
@@ -38,4 +40,32 @@ func main() {
 	if err := srv.ListenAndServe(); err != nil {
 		logger.Log.Fatal("failed to start server", zap.Error(err))
 	}
+}
+
+// ВРЕМЕННО, решить где это должно быть
+func initStorage(cfg *config.Config) (storage.Storage, error) {
+	if cfg.DatabaseDSN != "" {
+		sqlStorage, err := postgresql.NewStorage(cfg.DatabaseDSN)
+
+		// TODO: возможно лучше сделать, чтобы если будет ошибка, отправить в лог и перейти к следующей очереди
+		if err != nil {
+			return nil, err
+		}
+		return sqlStorage, nil
+	}
+
+	memoryStorage := memory.NewStorage()
+
+	if cfg.FileStoragePath != "" {
+		fileStorage, err := file.NewStorage(cfg.FileStoragePath, memoryStorage)
+
+		// TODO: возможно лучше сделать, чтобы если будет ошибка, отправить в лог и перейти к следующей очереди
+		if err != nil {
+			return nil, err
+		}
+		return fileStorage, nil
+	}
+
+	// fallback
+	return memoryStorage, nil
 }

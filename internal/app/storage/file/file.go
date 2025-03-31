@@ -8,13 +8,9 @@ import (
 	"path/filepath"
 
 	"github.com/chaikadn/url-shortener/internal/app/logger"
+	"github.com/chaikadn/url-shortener/internal/app/storage"
 	"github.com/chaikadn/url-shortener/internal/app/storage/memory"
 )
-
-type urlEntry struct {
-	ShortURL    string `json:"short_url"`
-	OriginalURL string `json:"original_url"`
-}
 
 type FileStorage struct {
 	file    *os.File
@@ -53,7 +49,7 @@ func (f *FileStorage) loadEntries() error {
 		return err
 	}
 	for {
-		var entry urlEntry
+		var entry storage.URLEntry
 		err := f.decoder.Decode(&entry)
 		if err == io.EOF {
 			break
@@ -61,26 +57,48 @@ func (f *FileStorage) loadEntries() error {
 		if err != nil {
 			return err
 		}
-		if err := f.memory.Add(context.Background(), entry.OriginalURL, entry.ShortURL); err != nil {
+		if err := f.memory.Add(context.Background(), &entry); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func (f *FileStorage) Add(ctx context.Context, longURL string, shortURL string) error {
-	entry := urlEntry{
-		ShortURL:    shortURL,
-		OriginalURL: longURL,
+func (f *FileStorage) Add(ctx context.Context, entry *storage.URLEntry) error {
+	// не гарантируется синхронизация file и memory, eсли f.encoder.Encode(entry) выдаст ошибку
+
+	if err := f.memory.Add(ctx, entry); err != nil {
+		return err
 	}
 	if err := f.encoder.Encode(entry); err != nil {
 		return err
 	}
-	return f.memory.Add(ctx, longURL, shortURL)
+	return nil
 }
 
-func (f *FileStorage) Get(ctx context.Context, shortURL string) (string, error) {
-	return f.memory.Get(ctx, shortURL)
+func (f *FileStorage) AddBatch(ctx context.Context, batch []*storage.URLEntry) error {
+	for _, entry := range batch {
+		if err := f.Add(ctx, entry); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (f *FileStorage) GetOriginal(ctx context.Context, shortURL string) (*storage.URLEntry, error) {
+	entry, err := f.memory.GetOriginal(ctx, shortURL)
+	if err != nil {
+		return nil, err
+	}
+	return entry, nil
+}
+
+func (f *FileStorage) GetShort(ctx context.Context, originalURL string) (*storage.URLEntry, error) {
+	entry, err := f.memory.GetShort(ctx, originalURL)
+	if err != nil {
+		return nil, err
+	}
+	return entry, nil
 }
 
 func (f *FileStorage) Ping(ctx context.Context) error {

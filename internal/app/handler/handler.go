@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 
@@ -30,156 +31,157 @@ func New(stg storage.Storage, cfg *config.Config) (*Handler, error) {
 func (h *Handler) Route() *chi.Mux {
 	rt := chi.NewRouter()
 
-	rt.Post("/", h.shortenText)
-	rt.Get("/ping", h.pingStorage)
-	rt.Get("/{short-url}", h.getURL)
+	rt.Post("/", h.handleShortenText)
+	rt.Get("/ping", h.handlePing)
+	rt.Get("/{short-url}", h.handleRedirect)
 
 	rt.Route("/api", func(r chi.Router) {
 		// TODO: добавить middleware для игнорирования trailing slashes и сгруппировать маршруты
-		r.Post("/shorten", h.shortenJSON)
-		r.Post("/shorten/batch", h.shortenJSONbatch)
+		r.Post("/shorten", h.handleShortenJSON)
+		r.Post("/shorten/batch", h.handleShortenBatch)
 	})
 
 	return rt
 }
 
-func (h *Handler) getURL(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) handleRedirect(w http.ResponseWriter, r *http.Request) {
 	shortURL := chi.URLParam(r, "short-url")
-
-	originalURL, err := h.storage.Get(r.Context(), shortURL)
+	entry, err := h.storage.GetOriginal(r.Context(), shortURL)
 	if err != nil {
-		logger.Log.Error("failed to get url", zap.Error(err))
-		http.Error(w, "failed to get url", http.StatusNotFound)
+		if errors.Is(err, storage.ErrNotFound) {
+			h.respondError(w, http.StatusNotFound, "url not found", err)
+			return
+		}
+		h.respondError(w, http.StatusInternalServerError, "failed to get url", err)
 		return
 	}
-
-	w.Header().Set("Location", originalURL)
-	w.WriteHeader(http.StatusTemporaryRedirect)
+	http.Redirect(w, r, entry.OriginalURL, http.StatusTemporaryRedirect)
 }
 
-func (h *Handler) shortenText(w http.ResponseWriter, r *http.Request) {
-	originalURL, err := io.ReadAll(r.Body)
+func (h *Handler) handleShortenText(w http.ResponseWriter, r *http.Request) {
+	body, err := io.ReadAll(r.Body)
 	if err != nil {
-		logger.Log.Error("failed to read request", zap.Error(err))
-		http.Error(w, "failed to read request", http.StatusBadRequest)
+		h.respondError(w, http.StatusBadRequest, "failed to read body", err)
 		return
 	}
 	defer r.Body.Close()
 
-	shortURL, err := h.shortenAndSave(r.Context(), string(originalURL))
-	if err != nil {
-		logger.Log.Error("failed to shorten url", zap.Error(err))
-		http.Error(w, "failed to shorten url", http.StatusBadRequest)
-		return
-	}
-
-	w.WriteHeader(http.StatusCreated)
-	_, err = w.Write([]byte(h.config.BaseURL + "/" + shortURL))
-	if err != nil {
-		logger.Log.Error("failed to make response", zap.Error(err))
-		http.Error(w, "failed to make response", http.StatusInternalServerError)
-		return
+	shortURL, err := h.shorten(r.Context(), string(body))
+	switch {
+	case err == nil:
+		h.respondText(w, http.StatusCreated, []byte(shortURL)) // 201
+	case errors.Is(err, storage.ErrLongURLConflict):
+		h.respondText(w, http.StatusConflict, []byte(shortURL)) // 406
+	case errors.Is(err, storage.ErrShortURLConflict):
+		h.respondError(w, http.StatusInternalServerError, "failed to get short url", err)
+	default:
+		h.respondError(w, http.StatusBadRequest, "failed to shorten url", err)
 	}
 }
 
-func (h *Handler) shortenJSON(w http.ResponseWriter, r *http.Request) {
-	req := request{}
-	if err := h.decodeJSON(r.Body, &req); err != nil {
-		logger.Log.Error("failed to decode request", zap.Error(err))
-		http.Error(w, "failed to decode request", http.StatusBadRequest)
+func (h *Handler) handleShortenJSON(w http.ResponseWriter, r *http.Request) {
+	var req request
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		h.respondError(w, http.StatusBadRequest, "failed to decode json body", err)
 		return
 	}
+	defer r.Body.Close()
 
-	shortURL, err := h.shortenAndSave(r.Context(), req.URL)
-	if err != nil {
-		logger.Log.Error("failed to shorten url", zap.Error(err))
-		http.Error(w, "failed to shorten url", http.StatusBadRequest)
-		return
-	}
-
-	resp := response{
-		Result: h.config.BaseURL + "/" + shortURL,
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusCreated)
-
-	if err := h.encodeJSON(w, resp); err != nil {
-		logger.Log.Error("failed to encode response", zap.Error(err))
-		http.Error(w, "failed to encode response", http.StatusInternalServerError)
-		return
+	shortURL, err := h.shorten(r.Context(), req.URL)
+	switch {
+	case err == nil:
+		h.respondJSON(w, http.StatusCreated, response{Result: shortURL})
+	case errors.Is(err, storage.ErrLongURLConflict):
+		h.respondJSON(w, http.StatusConflict, response{Result: shortURL})
+	case errors.Is(err, storage.ErrShortURLConflict):
+		h.respondError(w, http.StatusInternalServerError, "failed to get short url", err)
+	default:
+		h.respondError(w, http.StatusBadRequest, "failed to shorten url", err)
 	}
 }
 
-func (h *Handler) shortenJSONbatch(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) handleShortenBatch(w http.ResponseWriter, r *http.Request) {
 	var reqBatch []requestBatch
-
-	if err := h.decodeJSON(r.Body, &reqBatch); err != nil {
-		logger.Log.Error("failed to decode request", zap.Error(err))
-		http.Error(w, "failed to decode request", http.StatusBadRequest)
+	if err := json.NewDecoder(r.Body).Decode(&reqBatch); err != nil {
+		h.respondError(w, http.StatusBadRequest, "failed to decode json body", err)
 		return
 	}
+	defer r.Body.Close()
 
 	if len(reqBatch) == 0 {
-		logger.Log.Error("sent empty batch")
-		http.Error(w, "batch cannot be empty", http.StatusBadRequest)
+		h.respondError(w, http.StatusBadRequest, "batch cannot be empty", storage.ErrEmptyBatch)
 		return
 	}
 
 	var respBatch []responseBatch
-	// TODO: id не сохраняются в storage, исправить
-	// будет медленно работать, найти решение (транзакции и скомпилированные запросы в postgresql)
-	for _, req := range reqBatch {
-		shortURL, err := h.shortenAndSave(r.Context(), req.OriginalURL)
-		if err != nil {
-			logger.Log.Error("failed to shorten url", zap.Error(err))
-			http.Error(w, "failed to shorten url", http.StatusBadRequest)
+	var status = http.StatusCreated
+	for _, entry := range reqBatch {
+		shortURL, err := h.shorten(r.Context(), entry.OriginalURL)
+		switch {
+		case err == nil:
+			respBatch = append(respBatch, responseBatch{CorrelationID: entry.CorrelationID, ShortURL: shortURL})
+		case errors.Is(err, storage.ErrLongURLConflict):
+			status = http.StatusConflict
+			respBatch = append(respBatch, responseBatch{CorrelationID: entry.CorrelationID, ShortURL: shortURL})
+		default:
+			h.respondError(w, http.StatusBadRequest, "failed to shorten batch", err)
 			return
 		}
-		respBatch = append(respBatch,
-			responseBatch{
-				ID:       req.ID,
-				ShortURL: h.config.BaseURL + "/" + shortURL,
-			})
 	}
-
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusCreated)
-
-	if err := h.encodeJSON(w, respBatch); err != nil {
-		logger.Log.Error("failed to encode response", zap.Error(err))
-		http.Error(w, "failed to encode response", http.StatusInternalServerError)
-		return
-	}
+	h.respondJSON(w, status, respBatch)
 }
 
-func (h *Handler) decodeJSON(r io.ReadCloser, source any) error {
-	defer r.Close()
-	return json.NewDecoder(r).Decode(source)
-}
-
-func (h *Handler) encodeJSON(w io.Writer, dest any) error {
-	return json.NewEncoder(w).Encode(dest)
-}
-
-func (h *Handler) shortenAndSave(ctx context.Context, originalURL string) (string, error) {
-	if !util.IsValidURL(originalURL) {
-		return "", errors.New("url is invalid or empty")
-	}
-
-	shortURL := util.RandStr(8)
-	if err := h.storage.Add(ctx, originalURL, shortURL); err != nil {
-		return "", err
-	}
-
-	return shortURL, nil
-}
-
-func (h *Handler) pingStorage(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) handlePing(w http.ResponseWriter, r *http.Request) {
 	err := h.storage.Ping(r.Context())
 	if err != nil {
-		logger.Log.Error("failed to connect to storage", zap.Error(err))
-		http.Error(w, "failed to connect to storage", http.StatusInternalServerError)
+		h.respondError(w, http.StatusInternalServerError, "failed to connect to storage", err)
 		return
+	}
+}
+
+func (h *Handler) respondJSON(w http.ResponseWriter, status int, data any) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	if err := json.NewEncoder(w).Encode(data); err != nil {
+		logger.Log.Error("failed to encode json", zap.Error(err))
+	}
+}
+
+func (h *Handler) respondText(w http.ResponseWriter, status int, data []byte) {
+	w.Header().Set("Content-Type", "text/plain")
+	w.WriteHeader(status)
+	_, err := w.Write(data)
+	if err != nil {
+		logger.Log.Error("failed to write body", zap.Error(err))
+	}
+}
+
+func (h *Handler) respondError(w http.ResponseWriter, status int, message string, err error) {
+	logger.Log.Error(message, zap.Error(err))
+	http.Error(w, message, status)
+}
+
+func (h *Handler) shorten(ctx context.Context, originalURL string) (string, error) {
+	// использовать валидатор (например, go-playground/validator)
+	if !util.IsValidURL(originalURL) {
+		return "", fmt.Errorf("invalid url '%s'", originalURL)
+	}
+
+	// использовать хеширование с обрезкой до 8 символов
+	shortKey := util.RandStr(8)
+	entry := storage.URLEntry{OriginalURL: originalURL, ShortURL: shortKey}
+
+	// FIXME
+	switch err := h.storage.Add(ctx, &entry); {
+	case err == nil:
+		return fmt.Sprintf("%s/%s", h.config.BaseURL, shortKey), nil
+	case errors.Is(err, storage.ErrLongURLConflict):
+		existingEntry, getErr := h.storage.GetShort(ctx, originalURL)
+		if getErr != nil {
+			return "", fmt.Errorf("failed to resolve url conflict: %w", getErr)
+		}
+		return fmt.Sprintf("%s/%s", h.config.BaseURL, existingEntry.ShortURL), storage.ErrLongURLConflict
+	default:
+		return "", err
 	}
 }

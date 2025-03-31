@@ -2,44 +2,28 @@ package storage
 
 import (
 	"context"
+	"errors"
+)
 
-	"github.com/chaikadn/url-shortener/internal/app/config"
-	"github.com/chaikadn/url-shortener/internal/app/storage/file"
-	"github.com/chaikadn/url-shortener/internal/app/storage/memory"
-	"github.com/chaikadn/url-shortener/internal/app/storage/postgresql"
+type URLEntry struct {
+	ID          int    `json:"uuid"`
+	ShortURL    string `json:"short_url"`
+	OriginalURL string `json:"original_url"`
+}
+
+var (
+	ErrLongURLConflict  = errors.New("long url conflict")
+	ErrShortURLConflict = errors.New("short url conflict")
+	ErrNotFound         = errors.New("url not found")
+	ErrEmptyBatch       = errors.New("empty batch")
 )
 
 type Storage interface {
-	Add(ctx context.Context, longURL string, shortURL string) (err error)
-	Get(ctx context.Context, shortURL string) (longURL string, err error)
-	// Delete
+	Add(ctx context.Context, entry *URLEntry) (err error)
+	AddBatch(ctx context.Context, batch []*URLEntry) (err error)
+	GetOriginal(ctx context.Context, shortURL string) (entry *URLEntry, err error)
+	GetShort(ctx context.Context, originalURl string) (entry *URLEntry, err error)
+	// Delete(ctx context.Context, shortURL string) (err error)
 	Ping(ctx context.Context) (err error)
 	Close() (err error)
-}
-
-func Initialize(cfg *config.Config) (Storage, error) {
-	if cfg.DatabaseDSN != "" {
-		sqlStorage, err := postgresql.NewStorage(cfg.DatabaseDSN)
-
-		// TODO: возможно лучше сделать, чтобы если будет ошибка, отправить в лог и перейти к следующей очереди
-		if err != nil {
-			return nil, err
-		}
-		return sqlStorage, nil
-	}
-
-	memoryStorage := memory.NewStorage()
-
-	if cfg.FileStoragePath != "" {
-		fileStorage, err := file.NewStorage(cfg.FileStoragePath, memoryStorage)
-
-		// TODO: возможно лучше сделать, чтобы если будет ошибка, отправить в лог и перейти к следующей очереди
-		if err != nil {
-			return nil, err
-		}
-		return fileStorage, nil
-	}
-
-	// fallback
-	return memoryStorage, nil
 }
