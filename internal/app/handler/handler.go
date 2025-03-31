@@ -171,7 +171,6 @@ func (h *Handler) shorten(ctx context.Context, originalURL string) (string, erro
 	shortKey := util.RandStr(8)
 	entry := storage.URLEntry{OriginalURL: originalURL, ShortURL: shortKey}
 
-	// FIXME
 	switch err := h.storage.Add(ctx, &entry); {
 	case err == nil:
 		return fmt.Sprintf("%s/%s", h.config.BaseURL, shortKey), nil

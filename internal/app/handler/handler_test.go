@@ -2,7 +2,7 @@ package handler
 
 import (
 	"context"
-	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -10,12 +10,14 @@ import (
 	"testing"
 
 	"github.com/chaikadn/url-shortener/internal/app/config"
+	"github.com/chaikadn/url-shortener/internal/app/storage"
 	"github.com/chaikadn/url-shortener/mocks"
 	"github.com/golang/mock/gomock"
 	"github.com/stretchr/testify/assert"
 )
 
-func TestHandler_pingStorage(t *testing.T) {
+// TODO: сделать мок для RandStr(length int) string
+func TestHandler_handlePing(t *testing.T) {
 	tests := []struct {
 		name       string
 		mockSetup  func(*mocks.MockStorage)
@@ -55,7 +57,7 @@ func TestHandler_pingStorage(t *testing.T) {
 			r := httptest.NewRequest(http.MethodGet, "/ping", nil)
 			w := httptest.NewRecorder()
 
-			h.pingStorage(w, r)
+			h.handlePing(w, r)
 
 			res := w.Result()
 			defer res.Body.Close()
@@ -69,7 +71,7 @@ func TestHandler_pingStorage(t *testing.T) {
 	}
 }
 
-func TestHandler_getURL(t *testing.T) {
+func TestHandler_handleRedirect(t *testing.T) {
 	tests := []struct {
 		name         string
 		mockSetup    func(*mocks.MockStorage)
@@ -82,7 +84,9 @@ func TestHandler_getURL(t *testing.T) {
 		{
 			name: "succsessful get",
 			mockSetup: func(ms *mocks.MockStorage) {
-				ms.EXPECT().Get(gomock.Any(), "test").Return("https://practicum.yandex.ru", nil)
+				ms.EXPECT().
+					GetOriginal(gomock.Any(), "test").
+					Return(&storage.URLEntry{ShortURL: "test", OriginalURL: "https://practicum.yandex.ru"}, nil)
 			},
 			method:       http.MethodGet,
 			uri:          "/test",
@@ -93,11 +97,22 @@ func TestHandler_getURL(t *testing.T) {
 		{
 			name: "wrong short url",
 			mockSetup: func(ms *mocks.MockStorage) {
-				ms.EXPECT().Get(gomock.Any(), "wrong").Return("", assert.AnError)
+				ms.EXPECT().GetOriginal(gomock.Any(), "wrong").Return(nil, storage.ErrNotFound)
 			},
 			method:       http.MethodGet,
 			uri:          "/wrong",
 			wantStatus:   http.StatusNotFound,
+			wantLocation: "",
+			wantBody:     "url not found\n",
+		},
+		{
+			name: "storage error",
+			mockSetup: func(ms *mocks.MockStorage) {
+				ms.EXPECT().GetOriginal(gomock.Any(), "error").Return(nil, assert.AnError)
+			},
+			method:       http.MethodGet,
+			uri:          "/error",
+			wantStatus:   http.StatusInternalServerError,
 			wantLocation: "",
 			wantBody:     "failed to get url\n",
 		},
@@ -142,10 +157,7 @@ func TestHandler_getURL(t *testing.T) {
 	}
 }
 
-func TestHandler_shortenFromText(t *testing.T) {
-
-	succsessBody := "http://localhost:8080/.*"
-
+func TestHandler_handleShortenText(t *testing.T) {
 	tests := []struct {
 		name       string
 		mockSetup  func(*mocks.MockStorage)
@@ -157,20 +169,23 @@ func TestHandler_shortenFromText(t *testing.T) {
 		{
 			name: "succsessful",
 			mockSetup: func(ms *mocks.MockStorage) {
-				ms.EXPECT().Add(gomock.Any(), "https://practicum.yandex.ru", gomock.Any()).Return(nil)
+				ms.EXPECT().
+					Add(gomock.Any(), gomock.Any()).
+					Return(nil)
 			},
 			method:     http.MethodPost,
 			body:       "https://practicum.yandex.ru",
 			wantStatus: http.StatusCreated,
-			wantBody:   succsessBody,
+			wantBody:   "http://localhost:8080/.*",
 		},
 		{
 			name: "storage error",
 			mockSetup: func(ms *mocks.MockStorage) {
-				ms.EXPECT().Add(gomock.Any(), "https://error.ru", gomock.Any()).Return(assert.AnError)
+				ms.EXPECT().
+					Add(gomock.Any(), gomock.Any()).Return(assert.AnError)
 			},
 			method:     http.MethodPost,
-			body:       "https://error.ru",
+			body:       "https://any.ru",
 			wantStatus: http.StatusBadRequest,
 			wantBody:   "failed to shorten url",
 		},
@@ -221,10 +236,7 @@ func TestHandler_shortenFromText(t *testing.T) {
 	}
 }
 
-func TestHandler_shortenFromJSON(t *testing.T) {
-
-	succsessBody := `{"result":"http://localhost:8080/.*"}`
-
+func TestHandler_handleShortenJSON(t *testing.T) {
 	tests := []struct {
 		name            string
 		mockSetup       func(*mocks.MockStorage)
@@ -237,18 +249,18 @@ func TestHandler_shortenFromJSON(t *testing.T) {
 		{
 			name: "succsessful",
 			mockSetup: func(ms *mocks.MockStorage) {
-				ms.EXPECT().Add(gomock.Any(), "https://practicum.yandex.ru", gomock.Any()).Return(nil)
+				ms.EXPECT().Add(gomock.Any(), gomock.Any()).Return(nil)
 			},
 			method:          http.MethodPost,
 			body:            `{"url": "https://practicum.yandex.ru"}`,
 			wantContentType: "application/json",
 			wantStatus:      http.StatusCreated,
-			wantBody:        succsessBody,
+			wantBody:        `{"result":"http://localhost:8080/.*"}`,
 		},
 		{
 			name: "storage error",
 			mockSetup: func(ms *mocks.MockStorage) {
-				ms.EXPECT().Add(gomock.Any(), "https://error.ru", gomock.Any()).Return(assert.AnError)
+				ms.EXPECT().Add(gomock.Any(), gomock.Any()).Return(assert.AnError)
 			},
 			method:     http.MethodPost,
 			body:       `{"url": "https://error.ru"}`,
@@ -269,7 +281,7 @@ func TestHandler_shortenFromJSON(t *testing.T) {
 			method:     http.MethodPost,
 			body:       `invalid-json`,
 			wantStatus: http.StatusBadRequest,
-			wantBody:   "failed to decode request",
+			wantBody:   "failed to decode json body",
 		},
 		{
 			name:       "wrong method",
@@ -313,8 +325,7 @@ func TestHandler_shortenFromJSON(t *testing.T) {
 	}
 }
 
-func TestHandler_shortenAndSave(t *testing.T) {
-
+func TestHandler_shorten(t *testing.T) {
 	tests := []struct {
 		name        string
 		mockSetup   func(*mocks.MockStorage)
@@ -324,7 +335,7 @@ func TestHandler_shortenAndSave(t *testing.T) {
 		{
 			name: "succsess",
 			mockSetup: func(ms *mocks.MockStorage) {
-				ms.EXPECT().Add(gomock.Any(), "https://practicum.yandex.ru", gomock.Any()).Return(nil)
+				ms.EXPECT().Add(gomock.Any(), gomock.Any()).Return(nil)
 			},
 			originalURL: "https://practicum.yandex.ru",
 			wantErr:     nil,
@@ -332,7 +343,7 @@ func TestHandler_shortenAndSave(t *testing.T) {
 		{
 			name: "storage error",
 			mockSetup: func(ms *mocks.MockStorage) {
-				ms.EXPECT().Add(gomock.Any(), "https://error.ru", gomock.Any()).Return(assert.AnError)
+				ms.EXPECT().Add(gomock.Any(), gomock.Any()).Return(assert.AnError)
 			},
 			originalURL: "https://error.ru",
 			wantErr:     assert.AnError,
@@ -341,13 +352,13 @@ func TestHandler_shortenAndSave(t *testing.T) {
 			name:        "invalid url",
 			mockSetup:   func(ms *mocks.MockStorage) {},
 			originalURL: "invalid-url",
-			wantErr:     errors.New("url is invalid or empty"),
+			wantErr:     fmt.Errorf("invalid url 'invalid-url'"),
 		},
 		{
 			name:        "empty url",
 			mockSetup:   func(ms *mocks.MockStorage) {},
 			originalURL: "",
-			wantErr:     errors.New("url is invalid or empty"),
+			wantErr:     fmt.Errorf("invalid url ''"),
 		},
 	}
 	for _, tt := range tests {
@@ -360,10 +371,10 @@ func TestHandler_shortenAndSave(t *testing.T) {
 
 			h := &Handler{
 				storage: mst,
-				config:  nil,
+				config:  &config.Config{BaseURL: "http://localhost:8080"},
 			}
 
-			shortURL, err := h.shortenAndSave(context.Background(), tt.originalURL)
+			shortURL, err := h.shorten(context.Background(), tt.originalURL)
 
 			if tt.wantErr == nil {
 				assert.NoError(t, err)
@@ -374,7 +385,7 @@ func TestHandler_shortenAndSave(t *testing.T) {
 			if err != nil {
 				assert.Equal(t, "", shortURL)
 			} else {
-				assert.Regexp(t, `^[a-zA-Z0-9]{8}$`, shortURL)
+				assert.Regexp(t, fmt.Sprintf(`^%s/[a-zA-Z0-9]{8}$`, h.config.BaseURL), shortURL)
 			}
 		})
 	}

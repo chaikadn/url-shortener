@@ -93,18 +93,18 @@ func (mr *MockStorageMockRecorder) GetOriginal(ctx, shortURL interface{}) *gomoc
 }
 
 // GetShort mocks base method.
-func (m *MockStorage) GetShort(ctx context.Context, originalURl string) (*storage.URLEntry, error) {
+func (m *MockStorage) GetShort(ctx context.Context, originalURL string) (*storage.URLEntry, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "GetShort", ctx, originalURl)
+	ret := m.ctrl.Call(m, "GetShort", ctx, originalURL)
 	ret0, _ := ret[0].(*storage.URLEntry)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
 
 // GetShort indicates an expected call of GetShort.
-func (mr *MockStorageMockRecorder) GetShort(ctx, originalURl interface{}) *gomock.Call {
+func (mr *MockStorageMockRecorder) GetShort(ctx, originalURL interface{}) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetShort", reflect.TypeOf((*MockStorage)(nil).GetShort), ctx, originalURl)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetShort", reflect.TypeOf((*MockStorage)(nil).GetShort), ctx, originalURL)
 }
 
 // Ping mocks base method.

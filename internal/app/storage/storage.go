@@ -22,7 +22,7 @@ type Storage interface {
 	Add(ctx context.Context, entry *URLEntry) (err error)
 	AddBatch(ctx context.Context, batch []*URLEntry) (err error)
 	GetOriginal(ctx context.Context, shortURL string) (entry *URLEntry, err error)
-	GetShort(ctx context.Context, originalURl string) (entry *URLEntry, err error)
+	GetShort(ctx context.Context, originalURL string) (entry *URLEntry, err error)
 	// Delete(ctx context.Context, shortURL string) (err error)
 	Ping(ctx context.Context) (err error)
 	Close() (err error)
