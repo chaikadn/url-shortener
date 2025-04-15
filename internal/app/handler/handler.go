@@ -9,22 +9,25 @@ import (
 	"net/http"
 
 	"github.com/chaikadn/url-shortener/internal/app/config"
-	"github.com/chaikadn/url-shortener/internal/app/logger"
+	"github.com/chaikadn/url-shortener/internal/app/model"
 	"github.com/chaikadn/url-shortener/internal/app/storage"
-	"github.com/chaikadn/url-shortener/internal/app/util"
+	"github.com/chaikadn/url-shortener/pkg/random"
+	"github.com/chaikadn/url-shortener/pkg/validation"
 	"github.com/go-chi/chi/v5"
 	"go.uber.org/zap"
 )
 
 type Handler struct {
-	storage storage.Storage
 	config  *config.Config
+	log     *zap.Logger
+	storage storage.Storage
 }
 
-func New(stg storage.Storage, cfg *config.Config) (*Handler, error) {
+func New(cfg *config.Config, log *zap.Logger, stg storage.Storage) (*Handler, error) {
 	return &Handler{
-		storage: stg,
 		config:  cfg,
+		log:     log,
+		storage: stg,
 	}, nil
 }
 
@@ -36,6 +39,8 @@ func (h *Handler) Route() *chi.Mux {
 	rt.Get("/{short-url}", h.handleRedirect)
 
 	rt.Route("/api", func(r chi.Router) {
+		r.Get("/user/urls", h.handleUserURLs)
+
 		// TODO: добавить middleware для игнорирования trailing slashes и сгруппировать маршруты
 		r.Post("/shorten", h.handleShortenJSON)
 		r.Post("/shorten/batch", h.handleShortenBatch)
@@ -48,7 +53,7 @@ func (h *Handler) handleRedirect(w http.ResponseWriter, r *http.Request) {
 	shortURL := chi.URLParam(r, "short-url")
 	entry, err := h.storage.GetOriginal(r.Context(), shortURL)
 	if err != nil {
-		if errors.Is(err, storage.ErrNotFound) {
+		if errors.Is(err, model.ErrNotFound) {
 			h.respondError(w, http.StatusNotFound, "url not found", err)
 			return
 		}
@@ -70,13 +75,39 @@ func (h *Handler) handleShortenText(w http.ResponseWriter, r *http.Request) {
 	switch {
 	case err == nil:
 		h.respondText(w, http.StatusCreated, []byte(shortURL)) // 201
-	case errors.Is(err, storage.ErrLongURLConflict):
+	case errors.Is(err, model.ErrLongURLConflict):
 		h.respondText(w, http.StatusConflict, []byte(shortURL)) // 406
-	case errors.Is(err, storage.ErrShortURLConflict):
+	case errors.Is(err, model.ErrShortURLConflict):
 		h.respondError(w, http.StatusInternalServerError, "failed to get short url", err)
 	default:
 		h.respondError(w, http.StatusBadRequest, "failed to shorten url", err)
 	}
+}
+
+func (h *Handler) handleUserURLs(w http.ResponseWriter, r *http.Request) {
+	userID, ok := r.Context().Value(userIDKey).(string)
+	if !ok || userID == "" {
+		h.respondError(w, http.StatusUnauthorized, "authorization failed", fmt.Errorf("failed to get user id"))
+		return
+	}
+
+	entries, err := h.storage.GetByID(r.Context(), userID)
+	if err != nil {
+		h.respondError(w, http.StatusInternalServerError, "failed to get user urls", err)
+		return
+	}
+	if len(entries) == 0 {
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+	respUserURLs := make([]responseUserURL, len(entries))
+	for i, entry := range entries {
+		respUserURLs[i] = responseUserURL{
+			ShortURL:    fmt.Sprintf("%s/%s", h.config.BaseURL, entry.ShortURL),
+			OriginalURL: entry.OriginalURL,
+		}
+	}
+	h.respondJSON(w, http.StatusOK, respUserURLs)
 }
 
 func (h *Handler) handleShortenJSON(w http.ResponseWriter, r *http.Request) {
@@ -91,15 +122,16 @@ func (h *Handler) handleShortenJSON(w http.ResponseWriter, r *http.Request) {
 	switch {
 	case err == nil:
 		h.respondJSON(w, http.StatusCreated, response{Result: shortURL})
-	case errors.Is(err, storage.ErrLongURLConflict):
+	case errors.Is(err, model.ErrLongURLConflict):
 		h.respondJSON(w, http.StatusConflict, response{Result: shortURL})
-	case errors.Is(err, storage.ErrShortURLConflict):
+	case errors.Is(err, model.ErrShortURLConflict):
 		h.respondError(w, http.StatusInternalServerError, "failed to get short url", err)
 	default:
 		h.respondError(w, http.StatusBadRequest, "failed to shorten url", err)
 	}
 }
 
+// TODO: использовать AddBatch(ctx context.Context, batch []*model.URLEntry) (err error) вместо цикла
 func (h *Handler) handleShortenBatch(w http.ResponseWriter, r *http.Request) {
 	var reqBatch []requestBatch
 	if err := json.NewDecoder(r.Body).Decode(&reqBatch); err != nil {
@@ -109,18 +141,19 @@ func (h *Handler) handleShortenBatch(w http.ResponseWriter, r *http.Request) {
 	defer r.Body.Close()
 
 	if len(reqBatch) == 0 {
-		h.respondError(w, http.StatusBadRequest, "batch cannot be empty", storage.ErrEmptyBatch)
+		h.respondError(w, http.StatusBadRequest, "batch cannot be empty", model.ErrEmptyBatch)
 		return
 	}
 
 	var respBatch []responseBatch
 	var status = http.StatusCreated
+
 	for _, entry := range reqBatch {
 		shortURL, err := h.shorten(r.Context(), entry.OriginalURL)
 		switch {
 		case err == nil:
 			respBatch = append(respBatch, responseBatch{CorrelationID: entry.CorrelationID, ShortURL: shortURL})
-		case errors.Is(err, storage.ErrLongURLConflict):
+		case errors.Is(err, model.ErrLongURLConflict):
 			status = http.StatusConflict
 			respBatch = append(respBatch, responseBatch{CorrelationID: entry.CorrelationID, ShortURL: shortURL})
 		default:
@@ -143,7 +176,7 @@ func (h *Handler) respondJSON(w http.ResponseWriter, status int, data any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	if err := json.NewEncoder(w).Encode(data); err != nil {
-		logger.Log.Error("failed to encode json", zap.Error(err))
+		h.log.Error("failed to encode json", zap.Error(err))
 	}
 }
 
@@ -152,34 +185,45 @@ func (h *Handler) respondText(w http.ResponseWriter, status int, data []byte) {
 	w.WriteHeader(status)
 	_, err := w.Write(data)
 	if err != nil {
-		logger.Log.Error("failed to write body", zap.Error(err))
+		h.log.Error("failed to write body", zap.Error(err))
 	}
 }
 
 func (h *Handler) respondError(w http.ResponseWriter, status int, message string, err error) {
-	logger.Log.Error(message, zap.Error(err))
+	h.log.Error(message, zap.Error(err))
 	http.Error(w, message, status)
 }
 
 func (h *Handler) shorten(ctx context.Context, originalURL string) (string, error) {
-	// использовать валидатор (например, go-playground/validator)
-	if !util.IsValidURL(originalURL) {
-		return "", fmt.Errorf("invalid url '%s'", originalURL)
+	if err := validation.ValidateURL(originalURL); err != nil {
+		return "", err
 	}
 
-	// использовать хеширование с обрезкой до 8 символов
-	shortKey := util.RandStr(8)
-	entry := storage.URLEntry{OriginalURL: originalURL, ShortURL: shortKey}
+	userID, ok := ctx.Value(userIDKey).(string)
+	if !ok {
+		return "", fmt.Errorf("failed to get user id")
+	}
+
+	shortKey, err := random.RandomString(8)
+	if err != nil {
+		return "", err
+	}
+	entry := model.URLEntry{
+		UserID:      userID,
+		ShortURL:    shortKey,
+		OriginalURL: originalURL,
+	}
 
 	switch err := h.storage.Add(ctx, &entry); {
 	case err == nil:
 		return fmt.Sprintf("%s/%s", h.config.BaseURL, shortKey), nil
-	case errors.Is(err, storage.ErrLongURLConflict):
+	case errors.Is(err, model.ErrLongURLConflict):
+		// не добавляется в файл с привязкой к новому пользователю
 		existingEntry, getErr := h.storage.GetShort(ctx, originalURL)
 		if getErr != nil {
 			return "", fmt.Errorf("failed to resolve url conflict: %w", getErr)
 		}
-		return fmt.Sprintf("%s/%s", h.config.BaseURL, existingEntry.ShortURL), storage.ErrLongURLConflict
+		return fmt.Sprintf("%s/%s", h.config.BaseURL, existingEntry.ShortURL), model.ErrLongURLConflict
 	default:
 		return "", err
 	}

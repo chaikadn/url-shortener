@@ -3,72 +3,104 @@ package memory
 import (
 	"context"
 
-	"github.com/chaikadn/url-shortener/internal/app/logger"
-	"github.com/chaikadn/url-shortener/internal/app/storage"
+	"github.com/chaikadn/url-shortener/internal/app/model"
+	"go.uber.org/zap"
 )
 
-// для быстрого двунаправленного поиска использовать две мапы
 type MemoryStorage struct {
-	storage map[string]*storage.URLEntry
-	nextID  int
+	// добавить мьютекс
+
+	log *zap.Logger
+
+	shortToLong map[string]string
+	longToShort map[string]string
+	userUrls    userURLs
 }
 
-func NewStorage() *MemoryStorage {
+func NewStorage(log *zap.Logger) *MemoryStorage {
+	log.Info("Initialized memory storage")
 	return &MemoryStorage{
-		storage: make(map[string]*storage.URLEntry),
-		nextID:  0,
+		log:         log,
+		shortToLong: make(map[string]string),
+		longToShort: make(map[string]string),
+		userUrls:    make(userURLs),
 	}
 }
 
-func (m *MemoryStorage) Add(ctx context.Context, entry *storage.URLEntry) error {
-	if _, err := m.GetShort(ctx, entry.OriginalURL); err == nil {
-		return storage.ErrLongURLConflict
+func (m *MemoryStorage) Add(ctx context.Context, entry *model.URLEntry) error {
+	if existingShort, ok := m.longToShort[entry.OriginalURL]; ok {
+		m.userUrls.AddUser(entry.UserID)
+		m.userUrls.AddUserURL(entry.UserID, existingShort)
+		return model.ErrLongURLConflict
 	}
-	if _, ok := m.storage[entry.ShortURL]; ok {
-		return storage.ErrShortURLConflict
+	if _, ok := m.shortToLong[entry.ShortURL]; ok {
+		return model.ErrShortURLConflict
 	}
 
-	entry.ID = m.nextID
-	m.storage[entry.ShortURL] = entry
-	m.nextID++
+	m.shortToLong[entry.ShortURL] = entry.OriginalURL
+	m.longToShort[entry.OriginalURL] = entry.ShortURL
+
+	m.userUrls.AddUser(entry.UserID)
+	m.userUrls.AddUserURL(entry.UserID, entry.ShortURL)
+
 	return nil
 }
 
-func (m *MemoryStorage) AddBatch(ctx context.Context, batch []*storage.URLEntry) error {
-	for _, entry := range batch {
-		if err := m.Add(ctx, entry); err != nil {
-			return err
-		}
+// func (m *MemoryStorage) AddBatch(ctx context.Context, batch []*model.URLEntry) error {
+// 	var err error
+// 	for _, entry := range batch {
+// 		err = m.Add(ctx, entry)
+// 		if err != nil && !errors.Is(err, model.ErrLongURLConflict) {
+// 			return err
+// 		}
+// 	}
+// 	return err
+// }
+
+func (m *MemoryStorage) GetOriginal(ctx context.Context, shortURL string) (*model.URLEntry, error) {
+	if _, ok := m.shortToLong[shortURL]; !ok {
+		return nil, model.ErrNotFound
 	}
-	return nil
+	entry := &model.URLEntry{
+		UserID:      "",
+		ShortURL:    shortURL,
+		OriginalURL: m.shortToLong[shortURL],
+	}
+	return entry, nil
 }
 
-func (m *MemoryStorage) GetOriginal(ctx context.Context, shortURL string) (*storage.URLEntry, error) {
-	if _, ok := m.storage[shortURL]; !ok {
-		return nil, storage.ErrNotFound
+func (m *MemoryStorage) GetShort(ctx context.Context, originalURL string) (*model.URLEntry, error) {
+	if _, ok := m.longToShort[originalURL]; !ok {
+		return nil, model.ErrNotFound
 	}
-	return m.storage[shortURL], nil
+	entry := &model.URLEntry{
+		UserID:      "",
+		ShortURL:    m.longToShort[originalURL],
+		OriginalURL: originalURL,
+	}
+	return entry, nil
 }
 
-// для быстрого двунаправленного поиска можно создать 2 мапы
-func (m *MemoryStorage) GetShort(ctx context.Context, originalURL string) (*storage.URLEntry, error) {
-	for _, entry := range m.storage {
-		if entry.OriginalURL == originalURL {
-			return entry, nil
+func (m *MemoryStorage) GetByID(ctx context.Context, userID string) ([]*model.URLEntry, error) {
+	res := []*model.URLEntry{}
+	if urls, ok := m.userUrls[userID]; ok {
+		for shortURL := range urls {
+			entry := &model.URLEntry{
+				UserID:      userID,
+				ShortURL:    shortURL,
+				OriginalURL: m.shortToLong[shortURL],
+			}
+			res = append(res, entry)
 		}
 	}
-	return nil, storage.ErrNotFound
+	return res, nil
 }
 
 func (m *MemoryStorage) Ping(ctx context.Context) (err error) {
-	logger.Log.Info("Ping memory storage")
+	m.log.Info("Ping memory storage")
 	return nil
 }
 
 func (m *MemoryStorage) Close() (err error) {
 	return nil
-}
-
-func (m *MemoryStorage) GetNextID() int {
-	return m.nextID
 }

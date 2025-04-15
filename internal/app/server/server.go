@@ -7,11 +7,16 @@ import (
 	"github.com/chaikadn/url-shortener/internal/app/handler"
 	"github.com/chaikadn/url-shortener/internal/app/logger"
 	"github.com/go-chi/chi/v5"
+	"go.uber.org/zap"
 )
 
-func New(hnd *handler.Handler, cfg *config.Config) *http.Server {
+func New(cfg *config.Config, log *zap.Logger, hnd *handler.Handler) *http.Server {
 	r := chi.NewRouter()
-	r.Use(logger.WithLogging, handler.WithGzip)
+	r.Use(
+		logger.WithLogging(log),
+		handler.WithGzip,
+		handler.WithAuth(log, cfg.JWTSecret),
+	)
 	r.Mount("/", hnd.Route())
 
 	return &http.Server{

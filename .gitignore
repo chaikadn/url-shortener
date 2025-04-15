@@ -28,3 +28,6 @@ vendor/
 
 # temp directories
 temp/
+
+# environment
+.env

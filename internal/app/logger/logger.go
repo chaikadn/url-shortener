@@ -5,49 +5,49 @@ import (
 	"time"
 
 	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
 )
 
-var Log *zap.Logger = zap.NewNop()
-
-func Initialize(level string) error {
-	lvl, err := zap.ParseAtomicLevel(level)
+func New(logLevel string) (*zap.Logger, error) {
+	lvl, err := zap.ParseAtomicLevel(logLevel)
 	if err != nil {
-		return err
+		return nil, err
 	}
-
 	cfg := zap.NewDevelopmentConfig()
 	cfg.Level = lvl
-	zl, err := cfg.Build(zap.AddStacktrace(zap.PanicLevel))
-	if err != nil {
-		return err
-	}
-	Log = zl
-	return nil
+	cfg.EncoderConfig.EncodeLevel = zapcore.CapitalColorLevelEncoder
+	cfg.EncoderConfig.EncodeTime = zapcore.TimeEncoderOfLayout("2006/01/02 15:04:05")
+	return cfg.Build(
+		zap.AddStacktrace(zap.PanicLevel),
+		zap.WithCaller(false),
+	)
 }
 
-func WithLogging(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		start := time.Now()
+// дополнить информацией
+func WithLogging(log *zap.Logger) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			start := time.Now()
 
-		responseData := &responseData{}
-		lw := &loggingResponseWriter{
-			ResponseWriter: w,
-			responseData:   responseData,
-		}
+			responseData := &responseData{}
+			lw := &loggingResponseWriter{
+				ResponseWriter: w,
+				responseData:   responseData,
+			}
 
-		uri := r.RequestURI
-		method := r.Method
+			uri := r.RequestURI
+			method := r.Method
 
-		// TODO: обработать ошибку
-		next.ServeHTTP(lw, r)
+			next.ServeHTTP(lw, r)
 
-		duration := time.Since(start)
-		Log.Info("Got HTTP request",
-			zap.String("uri", uri),
-			zap.String("method", method),
-			zap.Int("status", responseData.status),
-			zap.Duration("duration", duration),
-			zap.Int("size", responseData.size),
-		)
-	})
+			duration := time.Since(start)
+			log.Info("Served HTTP request",
+				zap.String("uri", uri),
+				zap.String("method", method),
+				zap.Int("status", responseData.status),
+				zap.Duration("duration", duration),
+				zap.Int("size", responseData.size),
+			)
+		})
+	}
 }

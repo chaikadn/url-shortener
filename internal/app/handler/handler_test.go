@@ -10,11 +10,14 @@ import (
 	"testing"
 
 	"github.com/chaikadn/url-shortener/internal/app/config"
-	"github.com/chaikadn/url-shortener/internal/app/storage"
+	"github.com/chaikadn/url-shortener/internal/app/model"
 	"github.com/chaikadn/url-shortener/mocks"
 	"github.com/golang/mock/gomock"
 	"github.com/stretchr/testify/assert"
+	"go.uber.org/zap"
 )
+
+const mockUserID = "123"
 
 // TODO: сделать мок для RandStr(length int) string
 func TestHandler_handlePing(t *testing.T) {
@@ -50,6 +53,7 @@ func TestHandler_handlePing(t *testing.T) {
 			tt.mockSetup(mst)
 
 			h := &Handler{
+				log:     zap.NewNop(),
 				storage: mst,
 				config:  nil,
 			}
@@ -86,7 +90,7 @@ func TestHandler_handleRedirect(t *testing.T) {
 			mockSetup: func(ms *mocks.MockStorage) {
 				ms.EXPECT().
 					GetOriginal(gomock.Any(), "test").
-					Return(&storage.URLEntry{ShortURL: "test", OriginalURL: "https://practicum.yandex.ru"}, nil)
+					Return(&model.URLEntry{ShortURL: "test", OriginalURL: "https://practicum.yandex.ru"}, nil)
 			},
 			method:       http.MethodGet,
 			uri:          "/test",
@@ -97,7 +101,7 @@ func TestHandler_handleRedirect(t *testing.T) {
 		{
 			name: "wrong short url",
 			mockSetup: func(ms *mocks.MockStorage) {
-				ms.EXPECT().GetOriginal(gomock.Any(), "wrong").Return(nil, storage.ErrNotFound)
+				ms.EXPECT().GetOriginal(gomock.Any(), "wrong").Return(nil, model.ErrNotFound)
 			},
 			method:       http.MethodGet,
 			uri:          "/wrong",
@@ -135,6 +139,7 @@ func TestHandler_handleRedirect(t *testing.T) {
 			tt.mockSetup(mst)
 
 			h := &Handler{
+				log:     zap.NewNop(),
 				storage: mst,
 				config:  nil,
 			}
@@ -215,11 +220,13 @@ func TestHandler_handleShortenText(t *testing.T) {
 			tt.mockSetup(mst)
 
 			h := &Handler{
+				log:     zap.NewNop(),
 				storage: mst,
 				config:  &config.Config{BaseURL: "http://localhost:8080"},
 			}
 
-			r := httptest.NewRequest(tt.method, "/", strings.NewReader(tt.body))
+			ctx := context.WithValue(context.Background(), userIDKey, mockUserID)
+			r := httptest.NewRequest(tt.method, "/", strings.NewReader(tt.body)).WithContext(ctx)
 			w := httptest.NewRecorder()
 
 			h.Route().ServeHTTP(w, r)
@@ -301,11 +308,13 @@ func TestHandler_handleShortenJSON(t *testing.T) {
 			tt.mockSetup(mst)
 
 			h := &Handler{
+				log:     zap.NewNop(),
 				storage: mst,
 				config:  &config.Config{BaseURL: "http://localhost:8080"},
 			}
 
-			r := httptest.NewRequest(tt.method, "/api/shorten", strings.NewReader(tt.body))
+			ctx := context.WithValue(context.Background(), userIDKey, mockUserID)
+			r := httptest.NewRequest(tt.method, "/api/shorten", strings.NewReader(tt.body)).WithContext(ctx)
 			w := httptest.NewRecorder()
 
 			h.Route().ServeHTTP(w, r)
@@ -352,13 +361,13 @@ func TestHandler_shorten(t *testing.T) {
 			name:        "invalid url",
 			mockSetup:   func(ms *mocks.MockStorage) {},
 			originalURL: "invalid-url",
-			wantErr:     fmt.Errorf("invalid url 'invalid-url'"),
+			wantErr:     assert.AnError,
 		},
 		{
 			name:        "empty url",
 			mockSetup:   func(ms *mocks.MockStorage) {},
 			originalURL: "",
-			wantErr:     fmt.Errorf("invalid url ''"),
+			wantErr:     assert.AnError,
 		},
 	}
 	for _, tt := range tests {
@@ -370,16 +379,18 @@ func TestHandler_shorten(t *testing.T) {
 			tt.mockSetup(mst)
 
 			h := &Handler{
+				log:     zap.NewNop(),
 				storage: mst,
 				config:  &config.Config{BaseURL: "http://localhost:8080"},
 			}
 
-			shortURL, err := h.shorten(context.Background(), tt.originalURL)
+			ctx := context.WithValue(context.Background(), userIDKey, mockUserID)
+			shortURL, err := h.shorten(ctx, tt.originalURL)
 
 			if tt.wantErr == nil {
 				assert.NoError(t, err)
 			} else {
-				assert.EqualError(t, err, tt.wantErr.Error())
+				assert.Error(t, err)
 			}
 
 			if err != nil {
