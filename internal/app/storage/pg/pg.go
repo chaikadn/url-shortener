@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 
 	"github.com/chaikadn/url-shortener/internal/app/model"
 	"github.com/jackc/pgerrcode"
@@ -12,14 +13,12 @@ import (
 	"go.uber.org/zap"
 )
 
+// TODO: добавить транзакции
+
 type PGStorage struct {
 	log *zap.Logger
 	db  *sql.DB
 }
-
-// TODO:
-// для привязки сокращенных url к uuid пользователя создать новую таблицу users,
-// в которой связываются пользователи и уникальные короткие url
 
 func NewStorage(log *zap.Logger, dsn string) (*PGStorage, error) {
 	db, err := sql.Open("pgx", dsn)
@@ -33,7 +32,7 @@ func NewStorage(log *zap.Logger, dsn string) (*PGStorage, error) {
 		db:  db,
 	}
 	// сделать миграцию вместо этого
-	if err = storage.createTableQuery(context.Background()); err != nil {
+	if err = storage.createTablesQuery(context.Background()); err != nil {
 		return nil, err
 	}
 
@@ -49,25 +48,19 @@ func (s *PGStorage) Close() error {
 	return s.db.Close()
 }
 
-// протестировать
 func (s *PGStorage) Add(ctx context.Context, entry *model.URLEntry) error {
-	_, err := s.db.ExecContext(ctx, `
-		INSERT INTO urls (short_url, original_url)
-		VALUES ($1, $2)`,
-		entry.ShortURL, entry.OriginalURL)
-	if err != nil {
-		var pgErr *pgconn.PgError
-		if errors.As(err, &pgErr) && pgErr.Code == pgerrcode.UniqueViolation {
-			switch pgErr.ConstraintName {
-			case "urls_short_url_key":
-				return model.ErrShortURLConflict
-			case "urls_original_url_key":
-				return model.ErrLongURLConflict
-			}
-		}
+	if err := s.addNewUser(ctx, entry.UserID); err != nil {
 		return err
 	}
-	return nil
+
+	pairID, err := s.addNewURLpair(ctx, entry.ShortURL, entry.OriginalURL)
+
+	if err == nil || errors.Is(err, model.ErrLongURLConflict) {
+		if addErr := s.addURLpairToUser(ctx, entry.UserID, pairID); addErr != nil {
+			return addErr
+		}
+	}
+	return err
 }
 
 // func (s *PGStorage) AddBatch(ctx context.Context, batch []*model.URLEntry) error {
@@ -108,17 +101,110 @@ func (s *PGStorage) GetShort(ctx context.Context, originalURL string) (*model.UR
 	return &entry, nil
 }
 
-// TODO:
 func (s *PGStorage) GetByID(ctx context.Context, userID string) ([]*model.URLEntry, error) {
-	return []*model.URLEntry{}, nil
+	var entries []*model.URLEntry
+
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT urls.short_url, urls.original_url
+		FROM user_urls
+		JOIN urls ON user_urls.url_pair_id = urls.id
+		WHERE user_urls.user_id = $1`, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		entry := model.URLEntry{}
+		if err := rows.Scan(&entry.ShortURL, &entry.OriginalURL); err != nil {
+			return nil, err
+		}
+		entry.UserID = userID
+		entries = append(entries, &entry)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	return entries, nil
 }
 
-func (s *PGStorage) createTableQuery(ctx context.Context) error {
+// добавляем пользователя если новый
+func (s *PGStorage) addNewUser(ctx context.Context, userID string) error {
+	_, err := s.db.ExecContext(ctx, `
+		INSERT INTO users(user_id) VALUES($1) 
+        ON CONFLICT(user_id) DO NOTHING`,
+		userID)
+	return err
+}
+
+// добавляем новую пару url, возвращаем ее id, или id старой пары и ErrLongURLConflict, или -1 и err
+func (s *PGStorage) addNewURLpair(ctx context.Context, shortURL, originalURL string) (pairID int, err error) {
+	err = s.db.QueryRowContext(ctx, `
+        INSERT INTO urls (short_url, original_url)
+        VALUES ($1, $2)
+        RETURNING id`,
+		shortURL, originalURL).Scan(&pairID)
+	if err == nil {
+		return pairID, nil
+	}
+
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) && pgErr.Code == pgerrcode.UniqueViolation {
+		switch pgErr.ConstraintName {
+		case "urls_short_url_key":
+			return -1, model.ErrShortURLConflict
+		case "urls_original_url_key":
+			row := s.db.QueryRowContext(ctx,
+				`SELECT id FROM urls WHERE original_url = $1`,
+				originalURL)
+			if scanErr := row.Scan(&pairID); scanErr != nil {
+				return -1, fmt.Errorf("failed to get existing url id: %w", scanErr)
+			}
+			return pairID, model.ErrLongURLConflict
+		default:
+			return -1, fmt.Errorf("unexpected unique constraint violation: %w", err)
+		}
+	}
+
+	return -1, err
+}
+
+// связываем пару url с пользователем, если не связана
+func (s *PGStorage) addURLpairToUser(ctx context.Context, userID string, pairID int) error {
+	_, err := s.db.ExecContext(ctx, `
+		INSERT INTO user_urls(user_id, url_pair_id) VALUES($1, $2)
+		ON CONFLICT(user_id, url_pair_id) DO NOTHING`,
+		userID, pairID)
+	return err
+}
+
+func (s *PGStorage) createTablesQuery(ctx context.Context) error {
+	// в транзакцию (индексты вроде как не нужны т.к. primary key неявно их создает)
 	_, err := s.db.ExecContext(ctx, `
         CREATE TABLE IF NOT EXISTS urls (
-            short_url VARCHAR(128) UNIQUE NOT NULL,
-            original_url VARCHAR(256) UNIQUE NOT NULL
+			id SERIAL PRIMARY KEY,
+            short_url VARCHAR(255) NOT NULL UNIQUE,
+            original_url VARCHAR(255) NOT NULL UNIQUE
         )`)
+	if err != nil {
+		return err
+	}
+
+	_, err = s.db.ExecContext(ctx, `
+		CREATE TABLE IF NOT EXISTS users (
+			user_id VARCHAR(255) PRIMARY KEY
+		)`)
+	if err != nil {
+		return err
+	}
+
+	_, err = s.db.ExecContext(ctx, `
+		CREATE TABLE IF NOT EXISTS user_urls (
+			user_id VARCHAR(255) NOT NULL REFERENCES users(user_id),
+			url_pair_id INT NOT NULL REFERENCES urls(id),
+			PRIMARY KEY (user_id, url_pair_id)
+		)`)
 	if err != nil {
 		return err
 	}
