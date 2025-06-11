@@ -40,6 +40,10 @@ func (c *Config) Load() error {
 
 	c.parseFlags()
 
+	if c.JWTsecret == "" {
+		return fmt.Errorf("load config: JWT_SECRET is not set")
+	}
+
 	log.Printf("\t\t\tConfig loaded successfully")
 	return nil
 }
