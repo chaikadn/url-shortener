@@ -3,12 +3,14 @@ package handler
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 
 	"github.com/chaikadn/url-shortener/internal/config"
 	"github.com/chaikadn/url-shortener/internal/middleware"
 	"github.com/chaikadn/url-shortener/internal/service"
+	"github.com/chaikadn/url-shortener/internal/storage"
 	"github.com/go-chi/chi/v5"
 
 	"go.uber.org/zap"
@@ -38,6 +40,11 @@ func (h *Handler) HandleLogin(w http.ResponseWriter, r *http.Request) {
 	}
 
 	token, err := h.userService.Login(req.Username, req.Password, h.config.JWTsecret)
+	if errors.Is(err, service.ErrUnauthorized) {
+		h.respondError(w, "wrong username or password", http.StatusUnauthorized, err)
+		return
+	}
+
 	if err != nil {
 		h.respondError(w, "failed to login", http.StatusInternalServerError, err)
 		return
@@ -54,6 +61,12 @@ func (h *Handler) HandleRegister(w http.ResponseWriter, r *http.Request) {
 	}
 
 	userID, err := h.userService.Register(req.Username, req.Password)
+
+	if errors.Is(err, storage.ErrUserAlreadyExists) {
+		h.respondError(w, "user already exists", http.StatusConflict, err)
+		return
+	}
+
 	if err != nil {
 		h.respondError(w, "failed to register", http.StatusInternalServerError, err)
 		return
@@ -61,7 +74,7 @@ func (h *Handler) HandleRegister(w http.ResponseWriter, r *http.Request) {
 
 	user, err := h.userService.GetUser(userID)
 	if err != nil {
-		h.respondError(w, "failed to get user", http.StatusInternalServerError, err)
+		h.respondError(w, "failed to get user data", http.StatusInternalServerError, err)
 		return
 	}
 
@@ -77,6 +90,11 @@ func (h *Handler) HandleRedirect(w http.ResponseWriter, r *http.Request) {
 	key := chi.URLParam(r, "key")
 
 	originalURL, err := h.shortenerService.GetOriginalURL(key)
+
+	if errors.Is(err, storage.ErrURLNotFound) {
+		h.respondError(w, "url not found", http.StatusNotFound, err)
+		return
+	}
 
 	if err != nil {
 		h.respondError(w, "failed to redirect", http.StatusInternalServerError, err)

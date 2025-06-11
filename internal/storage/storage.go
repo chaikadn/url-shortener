@@ -8,7 +8,7 @@ import (
 
 var (
 	ErrUserNotFound      = errors.New("user not found")
-	ErrURLnotFound       = errors.New("url not found")
+	ErrURLNotFound       = errors.New("url not found")
 	ErrKeyNotFound       = errors.New("key not found")
 	ErrUserAlreadyExists = errors.New("user already exists")
 	ErrURLAlreadyExists  = errors.New("url already exists")

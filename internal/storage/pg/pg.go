@@ -201,7 +201,7 @@ func (s *Storage) GetEntryByID(entryID int) (*model.URLEntry, error) {
 		entryID).Scan(&entry.ID, &entry.Key, &entry.OriginalURL, &entry.CreatedAt)
 
 	if errors.Is(err, sql.ErrNoRows) {
-		return nil, storage.ErrURLnotFound
+		return nil, storage.ErrURLNotFound
 	}
 	if err != nil {
 		return nil, fmt.Errorf("failed to get entry by id: %w", err)
@@ -223,7 +223,7 @@ func (s *Storage) GetEntryByKey(key string) (*model.URLEntry, error) {
 		key).Scan(&entry.ID, &entry.Key, &entry.OriginalURL, &entry.CreatedAt)
 
 	if errors.Is(err, sql.ErrNoRows) {
-		return nil, storage.ErrURLnotFound
+		return nil, storage.ErrURLNotFound
 	}
 	if err != nil {
 		return nil, fmt.Errorf("failed to get entry by key: %w", err)
@@ -245,7 +245,7 @@ func (s *Storage) GetEntryByURL(originalURL string) (*model.URLEntry, error) {
 		originalURL).Scan(&entry.ID, &entry.Key, &entry.OriginalURL, &entry.CreatedAt)
 
 	if errors.Is(err, sql.ErrNoRows) {
-		return nil, storage.ErrURLnotFound
+		return nil, storage.ErrURLNotFound
 	}
 	if err != nil {
 		return nil, fmt.Errorf("failed to get entry by url: %w", err)

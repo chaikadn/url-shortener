@@ -1,6 +1,7 @@
 package service
 
 import (
+	"errors"
 	"fmt"
 	"time"
 
@@ -8,6 +9,10 @@ import (
 	"github.com/chaikadn/url-shortener/internal/storage"
 	"github.com/golang-jwt/jwt/v5"
 	"golang.org/x/crypto/bcrypt"
+)
+
+var (
+	ErrUnauthorized = errors.New("authorization error")
 )
 
 type UserService interface {
@@ -44,16 +49,17 @@ func (u *userService) Register(username string, password string) (int, error) {
 func (u *userService) Login(username string, password string, secret string) (string, error) {
 	user, err := u.db.GetUserByName(username)
 	if err != nil {
-		return "", fmt.Errorf("failed to get user by name: %w", err)
+		return "", fmt.Errorf("%w: failed to get user by name: %v", ErrUnauthorized, err)
 	}
 
 	if err := verifyPassword(user.PasswordHash, password); err != nil {
-		return "", fmt.Errorf("failed to verify password: %w", err)
+		return "", fmt.Errorf("%w: failed to verify password: %v", ErrUnauthorized, err)
 	}
 
 	token, err := generateJWT(user.ID, secret)
 	if err != nil {
-		return "", fmt.Errorf("failed to generate token: %w", err)
+		return "", fmt.Errorf("%w: failed to generate token: %v", ErrUnauthorized, err)
+
 	}
 
 	return token, nil
